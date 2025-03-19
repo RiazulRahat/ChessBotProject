@@ -109,10 +109,10 @@ def get_square_rect(square_label):
     midbottom = board_coord[square_label]
     # Compute top-left coordinates from midbottom:
     x = midbottom[0] - SQUARE_SIZE // 2
-    y = midbottom[1] - SQUARE_SIZE
+    y = (midbottom[1] + 10) - SQUARE_SIZE
     return pygame.Rect(x, y, SQUARE_SIZE, SQUARE_SIZE)
 
-def highlight_square(square_label, color = (0, 255, 0 ,100)):
+def highlight_square(square_label, color = (128, 128, 128)):
     """
     Highlights the given square by drawing a semi-transparent rectangle over it.
     """
@@ -121,6 +121,21 @@ def highlight_square(square_label, color = (0, 255, 0 ,100)):
     highlight.fill(color)
     rect = get_square_rect(square_label)
     screen.blit(highlight, rect.topleft)
+
+def highlight_move_circle(square_label, color=(128, 128, 128)):
+    """
+    Draws a grey circle to indicate an available move on the given square.
+    
+    Parameters:
+      square_label (str): The square to highlight (e.g., "E4").
+      color (tuple): The RGB color for the circle. Default is grey.
+    """
+    rect = get_square_rect(square_label)
+    # Calculate the center of the square
+    center = rect.center
+    # Choose a radius that's a fraction of the square size
+    radius = SQUARE_SIZE // 6
+    pygame.draw.circle(screen, color, center, radius)
 
 def square_from_mouse(pos):
     """
@@ -193,7 +208,7 @@ while running:
     if selected_square:
         highlight_square(selected_square, color=(255, 255, 0, 150))  # Yellow for selection
         for dest in legal_destinations:
-            highlight_square(dest, color=(0, 255, 0, 150))  # Green for legal moves
+            highlight_move_circle(dest, color=(128, 128, 128))  # Grey for legal moves
 
     # Draw all pieces dynamically from engine board state.
     # Iterate all squares and draw it if piece is there
