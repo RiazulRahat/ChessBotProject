@@ -41,3 +41,5 @@ class ChessEngine:
     # Method to return final result
     def get_result(self):
         return self.board.result()
+    
+    

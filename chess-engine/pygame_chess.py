@@ -148,6 +148,210 @@ def square_from_mouse(pos):
             return square
     return None
 
+def promotion_prompt_vertical(color, target_coord):
+    """
+    Displays a vertical promotion prompt near the pawn's promotion square.
+    Returns the chosen promotion piece type (chess.QUEEN, chess.ROOK, etc.).
+    
+    Parameters:
+      color (bool): True for white, False for black.
+      target_coord (tuple): The pixel coordinate (x, y) near which the prompt should appear.
+      
+    Returns:
+      int: The promotion piece type from chess (e.g., chess.QUEEN, chess.ROOK, etc.)
+    """
+    # Define which piece symbols to show for white vs black
+    if color == chess.WHITE:
+        options = [
+            ("Q", piece_images["Q"]),
+            ("R", piece_images["R"]),
+            ("B", piece_images["B"]),
+            ("N", piece_images["N"])
+        ]
+    else:
+        options = [
+            ("q", piece_images["q"]),
+            ("r", piece_images["r"]),
+            ("b", piece_images["b"]),
+            ("n", piece_images["n"])
+        ]
+
+    # Each option will have the same box size as SQUARE_SIZE (or you can choose smaller).
+    option_size = SQUARE_SIZE
+    gap = 5  # Gap between each option box
+
+    # Let's place the prompt so its top-left corner is slightly to the right of the target square.
+    # For instance, place the first option 10 pixels to the right, and 2 squares above the target_coord.
+    # Adjust these offsets to your liking.
+    offset_x = 10
+    offset_y = -2 * SQUARE_SIZE
+
+    # The top-left of the first option box:
+    start_x = target_coord[0] + offset_x
+    start_y = target_coord[1] + offset_y
+
+    # Precompute rectangles for each option
+    option_rects = []
+    for i, (piece_symbol, image) in enumerate(options):
+        rect_x = start_x
+        rect_y = start_y + i * (option_size + gap)
+        option_rects.append(pygame.Rect(rect_x, rect_y, option_size, option_size))
+
+
+    # We'll run a mini-loop to let the user click one of the promotion options.
+    while True:
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                pygame.quit()
+                exit()
+            elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                mx, my = pygame.mouse.get_pos()
+                # Check each option's bounding box
+                for i, (piece_symbol, image) in enumerate(options):
+                    rect_x = start_x
+                    rect_y = start_y + i * (option_size + gap)
+                    rect = pygame.Rect(rect_x, rect_y, option_size, option_size)
+                    if rect.collidepoint(mx, my):
+                        # Return the corresponding promotion piece type.
+                        if piece_symbol.upper() == "Q":
+                            return chess.QUEEN
+                        elif piece_symbol.upper() == "R":
+                            return chess.ROOK
+                        elif piece_symbol.upper() == "B":
+                            return chess.BISHOP
+                        elif piece_symbol.upper() == "N":
+                            return chess.KNIGHT
+
+        # --- Drawing Section ---
+        # 1. Restore the background so the board remains visible
+        screen.blit(background_surf, (0, 0))
+
+        # 2. Optionally, draw a small semi-transparent overlay behind just the options
+        #    (instead of the whole screen).
+        for rect in option_rects:
+            small_overlay = pygame.Surface((rect.width, rect.height), pygame.SRCALPHA)
+            small_overlay.fill((0, 0, 0, 120))  # 120 alpha for partial transparency
+            screen.blit(small_overlay, rect.topleft)
+
+        # 3. Draw each option box and piece image
+        for (piece_symbol, image), rect in zip(options, option_rects):
+            # Draw a border for clarity
+            pygame.draw.rect(screen, (255, 255, 255), rect, 2)
+
+            # Center the piece image in the box
+            image_rect = image.get_rect(center=rect.center)
+            screen.blit(image, image_rect)
+
+        pygame.display.update()
+        clock.tick(30)
+
+def get_game_over_message(board):
+    """
+    Returns a string describing the game result if the board is in a game-over state.
+    Possible outcomes: checkmate, stalemate, insufficient material, etc.
+    """
+    if not board.is_game_over():
+        return None  # The game isn't actually over yet
+
+    # Check for checkmate
+    if board.is_checkmate():
+        # If it's checkmate, the side that just moved delivered the mate.
+        # 'board.turn' indicates who moves next, so the side that delivered mate is the opposite.
+        if board.turn == chess.WHITE:
+            return "Black Wins by Checkmate!"
+        else:
+            return "White Wins by Checkmate!"
+
+    # Other draw conditions
+    if board.is_stalemate():
+        return "Draw by Stalemate!"
+    if board.is_insufficient_material():
+        return "Draw by Insufficient Material!"
+    if board.is_seventyfive_moves():
+        return "Draw by 75-Move Rule!"
+    if board.is_fivefold_repetition():
+        return "Draw by Fivefold Repetition!"
+
+    # If we reach here, it's probably a 50-move rule or threefold repetition recognized as game_over
+    return "Game is a Draw!"
+
+def show_game_over_prompt(result_text, background_surf):
+    """
+    Displays a Game Over prompt with the given result_text (e.g., "White Wins by Checkmate!")
+    on top of the current board (background_surf), along with "Play Again" and "Exit" buttons.
+    
+    Returns:
+      str: "play_again" if user chooses to play again, "exit" if user chooses to exit.
+    """
+    # Choose a font
+    font_title = pygame.font.SysFont(None, 48)
+    font_button = pygame.font.SysFont(None, 32)
+
+    # Render the result text
+    text_surface = font_title.render(result_text, True, (255, 255, 255))
+    text_rect = text_surface.get_rect(center=(WIDTH // 2, HEIGHT // 2 - 50))
+
+    # Define button labels
+    play_again_surface = font_button.render("Play Again", True, (255, 255, 255))
+    exit_surface = font_button.render("Exit", True, (255, 255, 255))
+
+    # Create button rectangles
+    # The button width is based on the text width plus some padding.
+    button_padding_x = 20
+    button_padding_y = 10
+
+    play_again_rect = play_again_surface.get_rect()
+    exit_rect = exit_surface.get_rect()
+
+    # Position the buttons (for example, below the result text)
+    spacing = 20
+    play_again_rect.center = (WIDTH // 2, HEIGHT // 2 + 10)
+    exit_rect.center = (WIDTH // 2, play_again_rect.bottom + exit_rect.height // 2 + spacing)
+
+    # Expand the rect to allow some padding around the text
+    play_again_rect.inflate_ip(button_padding_x, button_padding_y)
+    exit_rect.inflate_ip(button_padding_x, button_padding_y)
+
+    while True:
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                return "exit"
+            elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                mx, my = pygame.mouse.get_pos()
+                # Check if user clicked one of the buttons
+                if play_again_rect.collidepoint(mx, my):
+                    return "play_again"
+                if exit_rect.collidepoint(mx, my):
+                    return "exit"
+
+        # Draw the background so the board is visible behind the text
+        screen.blit(background_surf, (0, 0))
+
+        # Draw a semi-transparent overlay
+        overlay = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
+        overlay.fill((0, 0, 0, 150))
+        screen.blit(overlay, (0, 0))
+
+        # Draw the result text
+        screen.blit(text_surface, text_rect)
+
+        # Draw the buttons (background + text)
+        # Play Again Button
+        pygame.draw.rect(screen, (150, 150, 150), play_again_rect)  # grey background
+        pygame.draw.rect(screen, (255, 255, 255), play_again_rect, 2)  # white border
+        text_rect_pa = play_again_surface.get_rect(center=play_again_rect.center)
+        screen.blit(play_again_surface, text_rect_pa)
+
+        # Exit Button
+        pygame.draw.rect(screen, (150, 150, 150), exit_rect)  # grey background
+        pygame.draw.rect(screen, (255, 255, 255), exit_rect, 2)  # white border
+        text_rect_exit = exit_surface.get_rect(center=exit_rect.center)
+        screen.blit(exit_surface, text_rect_exit)
+
+        pygame.display.update()
+        clock.tick(30)
+
+
 # --- Main Game Loop ---
 running = True
 while running:
@@ -178,19 +382,48 @@ while running:
                 else:
                     # A square is already selected. Check if clicked_square is a legal destination.
                     if clicked_square in legal_destinations:
-                        # Construct the move in SAN by using python-chess Move object.
                         from_sq = chess.parse_square(selected_square.lower())
                         to_sq = chess.parse_square(clicked_square.lower())
-                        # Find the move among legal moves.
                         move_found = None
                         for move in engine.board.legal_moves:
                             if move.from_square == from_sq and move.to_square == to_sq:
                                 move_found = move
                                 break
                         if move_found:
-                            # Apply the move to the engine's board.
+                            # Check if this move is a pawn promotion
+                            piece = engine.board.piece_at(from_sq)
+                            if piece and piece.piece_type == chess.PAWN and (chess.square_rank(to_sq) in [0, 7]):
+                                # The coordinate for the promotion square can be found from board_coord:
+                                # This is the midbottom coordinate for the to_sq label, so just do:
+                                to_sq_label = chess.square_name(to_sq).upper()
+                                target_coord = board_coord[to_sq_label]
+
+                                # Capture the current screen as background
+                                background_surf = screen.copy()
+                            
+                                # Show the vertical prompt near the promotion square
+                                promotion_piece = promotion_prompt_vertical(piece.color, target_coord)
+                                move_found = chess.Move(from_sq, to_sq, promotion=promotion_piece)
                             engine.board.push(move_found)
-                    # Clear the selection whether or not a legal move was made.
+
+                            # After detecting game over:
+                            if engine.board.is_game_over():
+                                result_text = get_game_over_message(engine.board)
+                                if result_text:
+                                    background_surf = screen.copy()
+                                    choice = show_game_over_prompt(result_text, background_surf)
+
+                                    if choice == "play_again":
+                                        # Reset the board
+                                        engine.board.reset()
+                                        selected_square = None
+                                        legal_destinations = []
+                                        # Continue the main loop with a fresh game
+                                        continue
+                                    elif choice == "exit":
+                                        running = False
+                                        break
+                    # Clear selection whether move was legal or not.
                     selected_square = None
                     legal_destinations = []
 
