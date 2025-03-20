@@ -10,6 +10,9 @@ from utils import scale_and_resize
 pygame.init()
 engine = ChessEngine()
 
+# Move history list: each move in SAN will be appended here.
+move_history = []
+
 # ---------------------------------
 # --- Board Coordinates Mapping ---
 # ---------------------------------
@@ -34,7 +37,7 @@ board_coord = {"A1":(83, 508), "A2":(83, 455), "A3":(83, 400), "A4":(83, 345),
 # ---------------------------------
 # --- Window and Board Settings ---
 # ---------------------------------
-WIDTH, HEIGHT = 550, 600    # Window Dimensions
+WIDTH, HEIGHT = 800, 600    # Window Dimensions
 BOARD_DIMENSION = 500       # Displayed chess board area (in pixels)
 
 # Calculate the size of each square on the board.
@@ -351,6 +354,53 @@ def show_game_over_prompt(result_text, background_surf):
         pygame.display.update()
         clock.tick(30)
 
+def draw_move_history():
+    """
+    Draws the move history panel on the right side of the screen.
+    It displays a header and lists moves in two columns for White and Black.
+    """
+    # Define the move history panel rectangle (adjust as needed)
+    history_rect = pygame.Rect(525, 50, 250, 500)
+    
+    # Draw the background and border for the panel
+    pygame.draw.rect(screen, (230, 230, 230), history_rect)
+    pygame.draw.rect(screen, (0, 0, 0), history_rect, 2)
+    
+    # Set up font for history text
+    font_history = pygame.font.SysFont(None, 24)
+    
+    # Draw header text
+    header = font_history.render("Move History", True, (0, 0, 0))
+    screen.blit(header, (history_rect.x + 10, history_rect.y + 10))
+    
+    # Draw column headers for White and Black moves
+    white_header = font_history.render("White", True, (0, 0, 0))
+    black_header = font_history.render("Black", True, (0, 0, 0))
+    screen.blit(white_header, (history_rect.x + 10, history_rect.y + 40))
+    screen.blit(black_header, (history_rect.x + history_rect.width//2 + 10, history_rect.y + 40))
+    
+    # Draw each move row: White moves are at even indices; Black moves, odd indices.
+    y_offset = history_rect.y + 70
+    row_height = 24
+    total_moves = len(move_history)
+    for i in range(0, total_moves, 2):
+        row_number = i // 2 + 1
+        
+        # Render row number
+        row_text = font_history.render(f"{row_number}.", True, (0, 0, 0))
+        screen.blit(row_text, (history_rect.x + 10, y_offset))
+        
+        # Render White move
+        white_move = move_history[i]
+        white_text = font_history.render(white_move, True, (0, 0, 0))
+        screen.blit(white_text, (history_rect.x + 40, y_offset))
+        
+        # Render Black move (if exists)
+        black_move = move_history[i+1] if i+1 < total_moves else ""
+        black_text = font_history.render(black_move, True, (0, 0, 0))
+        screen.blit(black_text, (history_rect.x + history_rect.width//2 + 10, y_offset))
+        
+        y_offset += row_height
 
 # --- Main Game Loop ---
 running = True
@@ -390,21 +440,20 @@ while running:
                                 move_found = move
                                 break
                         if move_found:
-                            # Check if this move is a pawn promotion
+                            # Check for pawn promotion
                             piece = engine.board.piece_at(from_sq)
                             if piece and piece.piece_type == chess.PAWN and (chess.square_rank(to_sq) in [0, 7]):
-                                # The coordinate for the promotion square can be found from board_coord:
-                                # This is the midbottom coordinate for the to_sq label, so just do:
-                                to_sq_label = chess.square_name(to_sq).upper()
-                                target_coord = board_coord[to_sq_label]
-
-                                # Capture the current screen as background
-                                background_surf = screen.copy()
-                            
-                                # Show the vertical prompt near the promotion square
-                                promotion_piece = promotion_prompt_vertical(piece.color, target_coord)
+                                promotion_piece = promotion_prompt_vertical(piece.color, board_coord[chess.square_name(to_sq).upper()], screen.copy())
                                 move_found = chess.Move(from_sq, to_sq, promotion=promotion_piece)
+        
+                            # Get the SAN notation for the move BEFORE pushing it.
+                            san_move = engine.board.san(move_found)
                             engine.board.push(move_found)
+                            move_history.append(san_move)
+    
+                            # Clear the selection and legal moves list
+                            selected_square = None
+                            legal_destinations = []
 
                             # After detecting game over:
                             if engine.board.is_game_over():
@@ -454,6 +503,8 @@ while running:
             img = piece_images.get(piece.symbol())
             if img:
                 draw_piece(img, square_label)
+
+    draw_move_history()       
 
     # Update the display window to show the new frame
     pygame.display.update()
