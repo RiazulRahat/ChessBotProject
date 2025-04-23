@@ -173,7 +173,19 @@ cython_debug/
 # PyPI configuration file
 .pypirc
 
-# .gitignore
-.venv/
-__pycache__/
+# — Python —
 *.pyc
+__pycache__/
+
+# — virtual-envs —
+.venv/
+env/
+
+# — large data —
+bot/eval_table.pkl
+bot/eval_table*.pkl
+*.pgn
+*.log
+
+# — Pygame assets —
+assets/

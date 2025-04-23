@@ -1,11 +1,12 @@
-# Chess Bot
-A chess bot that will play moves automatically on a chess engine and learn best moves over time.
+# Chess-Bot
 
-Chess-Engine
-- 2D game (using python-chess and pygame)
-- Self-drawn pieces and Board
-- Pieces movement indicator
-- Movement History in SAN Notation
-- Modularized Code
-- Game Over Indicator
-- Play-again / Close Game feature after game over
+A tiny TD(0) chess engine + Pygame GUI.
+
+* **`bot/`** – TD(0) learner (`chess_bot.py`) and self-play driver  
+* **`chess_engine/`** – Pygame front-end, human-vs-bot GUI  
+* **`assets/`** – board & piece PNGs (ignored by Git by default)
+
+Run the GUI:
+
+```bash
+python -m chess_engine.pygame_bot_human
