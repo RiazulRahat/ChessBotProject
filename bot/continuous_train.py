@@ -4,7 +4,7 @@ Run self‑play games forever (or until you press Ctrl‑C).
 Uses the same ChessBotAgent implementation that pickles its table after each game.
 """
 
-import chess, time
+import chess, datetime
 from chess_bot import ChessBotAgent
 
 def play_one_game(white_bot, black_bot, game_no):
@@ -18,25 +18,29 @@ def play_one_game(white_bot, black_bot, game_no):
         board.push(move)
 
     result = board.result()            # "1-0" / "0-1" / "1/2-1/2"
-    print(f"[{game_no}] result {result:7} | plies {board.fullmove_number*2}")
+    # print(f"[{game_no}] result {result:7} | plies {board.fullmove_number*2}")
     white_bot.update_evaluation(history, result)
     black_bot.update_evaluation(history, result)
 
 def main():
-    white_bot = ChessBotAgent(exploration_rate=0.2)
-    black_bot = ChessBotAgent(exploration_rate=0.2)
+    white_bot = ChessBotAgent(exploration_rate=0.2, learning_rate=0.10, save_interval=50)
+    black_bot = ChessBotAgent(exploration_rate=0.2, learning_rate=0.10, save_interval=50)
 
     game_counter = 1
     try:
         while True:
             play_one_game(white_bot, black_bot, game_counter)
+
+            if game_counter % 50 == 0:                    # show every 50 games
+                print(f"== finished {game_counter} games ==")
+                print(datetime.datetime.now().strftime("%H:%M:%S"), f"| {game_counter} games")
+
+
             game_counter += 1
 
-            # --- optional niceties -----------------------------------------
-            if game_counter % 50 == 0:        # every 50 games, short pause
-                print("== 50 games done, sleeping 2 s ==")
-                time.sleep(2)
     except KeyboardInterrupt:
+        white_bot._save_table()
+        black_bot._save_table()
         print("\nTraining interrupted by user. Table already saved. Goodbye!")
 
 if __name__ == "__main__":
