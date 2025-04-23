@@ -12,9 +12,11 @@ class ChessBotAgent:
     •   choose_move()     – ε‑greedy one‑ply search
     •   update_evaluation() – TD‑0 update after every game
     """
-    def __init__(self, exploration_rate=0.1, learning_rate=0.05):
+    def __init__(self, exploration_rate=0.1, learning_rate=0.05, save_interval=50):
         self.exploration_rate = exploration_rate
         self.learning_rate   = learning_rate
+        self.save_interval   = save_interval              
+        self.games_since_save = 0                         
         self.evaluation_table = self._load_table()
 
     # ----------  Heuristics  ----------
@@ -57,26 +59,38 @@ class ChessBotAgent:
         return best_mv or random.choice(legal)
 
     # ----------  Learning (TD‑0)  ----------
+    # ----------  Learning (true TD‑0, update every ply)  ----------
     def update_evaluation(self, game_history, result):
         """
-        TD‑0:   V(s) ← V(s) + α · (G − V(s))
-        where G is +1 (white win) / −1 (black win) / 0 (draw)
-        game_history  = [(fen_before_move, white_to_move_bool), ...]
+        Bootstrapped TD(0) update *backwards* through the game.
+        game_history is a list in chronological order:
+            [(fen_before_move_0, white_to_move_0),
+             (fen_before_move_1, white_to_move_1), ...]
         """
-        # final reward from White's perspective
-        if   result == "1-0":  G = 1
-        elif result == "0-1":  G = -1
-        else:                  G = DRAW_BIAS
 
-        for fen, white_to_move in game_history:
-            # perspective adjustment: if it was Black to move, negate reward
-            reward =  G if white_to_move else -G
-            old    = self.evaluation_table.get(fen, 0.0)
-            new    = old + self.learning_rate * (reward - old)
-            self.evaluation_table[fen] = new
+        # final reward from White’s perspective
+        if   result == "1-0":  next_v = 1.0
+        elif result == "0-1":  next_v = -1.0
+        else:                  next_v = DRAW_BIAS      # +0.2
 
-        # persist occasionally (every game is fine for now)
-        self._save_table()
+        # Walk the history *backwards*
+        for fen, white_to_move in reversed(game_history):
+            # If it was Black to move, flip the perspective
+            target =  next_v if white_to_move else -next_v
+
+            old_val = self.evaluation_table.get(fen, 0.0)
+            new_val = old_val + self.learning_rate * (target - old_val)
+            self.evaluation_table[fen] = new_val
+
+            # Bootstrapped target for the previous position
+            next_v = new_val if white_to_move else -new_val
+
+        # ---- deferred save ----
+        self.games_since_save += 1
+        if self.games_since_save >= self.save_interval:
+            self._save_table()
+            self.games_since_save = 0
+
 
     # ----------  Persistence helpers  ----------
     def _load_table(self):
