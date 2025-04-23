@@ -3,6 +3,7 @@ from sys import exit
 import chess
 from chess_engine import ChessEngine
 from utils import scale_and_resize
+from bot.chess_bot import ChessBotAgent
 
 # =============================================================================
 # Global Configuration & Initialization
@@ -17,9 +18,9 @@ WIDTH, HEIGHT = 800, 600                # Window Dimensions
 BOARD_DIMENSION = 500                   # Chess board display area in pixels
 SQUARE_SIZE = int(((BOARD_DIMENSION / 1274) * 1110) / 8)  # Size of each square
 
-# ---------------------------------
+# -----------------------------------------------------------------
 # Board Coordinates Mapping (for piece placement using midbottom)
-# ---------------------------------
+# -----------------------------------------------------------------
 board_coord = {
     "A1": (83, 508), "A2": (83, 455), "A3": (83, 400), "A4": (83, 345),
     "A5": (83, 290), "A6": (83, 237), "A7": (83, 181), "A8": (83, 127),
@@ -302,12 +303,16 @@ def show_game_over_prompt(result_text, background_surf):
 # =============================================================================
 
 def main():
-    global screen, clock, selected_square, legal_destinations, background_surf, piece_images
+    global screen, clock, selected_square, legal_destinations, background_surf, piece_images, move_history
+
     screen, clock = init_pygame()
     chess_board, piece_imgs = load_images()
     piece_images = piece_imgs  # assign to global variable
 
     engine = ChessEngine()
+
+    # Initialize chess bot (as Black for self play)
+    chess_bot = ChessBotAgent(exploration_rate=0.1)
     
     running = True
     while running:
