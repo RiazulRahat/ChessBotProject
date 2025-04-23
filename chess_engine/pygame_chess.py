@@ -1,8 +1,8 @@
 import pygame
 from sys import exit
 import chess
-from chess_engine import ChessEngine
-from utils import scale_and_resize
+from .chess_engine import ChessEngine
+from .utils import scale_and_resize
 from bot.chess_bot import ChessBotAgent
 
 # =============================================================================
