@@ -1,7 +1,7 @@
 > **NOTE:** This is a fork of [ChessBotProject](https://github.com/RiazulRahat/ChessBotProject).
 > Also Github version does not include pkl files
 
-Chess Bot Project
+# Chess Bot Project
 
 A modular, self-learning chess engine built with TD(0) learning, Zobrist hashing, and positional heuristics, with support for:
 
@@ -11,7 +11,7 @@ A modular, self-learning chess engine built with TD(0) learning, Zobrist hashing
 - Pygame GUI for human vs. bot play
 - Elo evaluation against Stockfish
 
-Current Features
+## Current Features
 
   At this level, the bot already supports:
 
@@ -24,7 +24,7 @@ Current Features
 - Elo Evaluation Harness: automated matches vs. Stockfish version for strength estimation and tuning.
 - Pygame GUI: interactive human vs. bot play with timed, iterative‑deepening moves and policy fallback.
 
-Installation:
+## Installation:
 
 - git clone <repo_url>
 - cd ChessBotProject
@@ -33,9 +33,9 @@ Installation:
 - pip install -r requirements.txt
 
 
-Usage:
+## Usage:
 
-  Self-Play Training
+  ### Self-Play Training
 
     # Fast bulk training (no quiescence)
     python -m bot.continuous_train
@@ -43,17 +43,17 @@ Usage:
     # (Optional) Enable quiescence in training
     edit bot/continuous_train.py: use_quiescence=True
 
-  Policy Generation
+  ### Policy Generation
 
     # After training completes:
     python bot/build_policy.py
 
-  Opening Book
+  ### Opening Book
 
     # Build opening_book.pkl from your PGN files:
     python scripts/build_opening_book.py
 
-  Eval-Table Conversion & Pruning
+  ### Eval-Table Conversion & Pruning
 
     # Convert FEN→Zobrist:
     python training/convert_eval_table_to_zobrist.py
@@ -61,19 +61,19 @@ Usage:
     # Prune low-value entries:
     python training/prune_eval_table.py
 
-  Elo Evaluation
+  ### Elo Evaluation
 
     # Test bot vs Stockfish (e.g. 100 games):
     python evaluate_elo.py --games 100 --positional-weight 0.8
 
-  Human vs Bot GUI
+  ### Human vs Bot GUI
 
     python -m chess_engine.pygame_bot_human
 
     Use the GUI to play against the bot with the latest trained policy and heuristics.
 
 
-Configuration:
+## Configuration:
 
 - Hyperparameters for training are in bot/continuous_train.py.
 - Heuristic weights (positional, mobility, safety) live in bot/evaluation/positional_heuristics.py.
