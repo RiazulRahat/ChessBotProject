@@ -14,10 +14,11 @@ A modular, self-learning chess engine built with TD(0) learning, Zobrist hashing
 Installation:
 
 git clone <repo_url>
-cd ChessBotProject
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
+
+- cd ChessBotProject
+- python3 -m venv .venv
+- source .venv/bin/activate
+- pip install -r requirements.txt
 
 
 Usage:
