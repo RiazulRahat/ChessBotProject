@@ -1,3 +1,5 @@
+> **NOTE:** This is a fork of [ChessBotProject](https://github.com/RiazulRahat/ChessBotProject).  
+
 Chess Bot Project
 
 A modular, self-learning chess engine built with TD(0) learning, Zobrist hashing, and positional heuristics, with support for:
