@@ -3,24 +3,28 @@ Self-play trainer.  Edit TOTAL_GAMES or run Ctrl-C to stop.
 """
 
 import chess, datetime, statistics, sys
-from chess_bot import ChessBotAgent
+from bot.utils.zobrist import zobrist
+from bot.chess_bot import ChessBotAgent
 
 # ─── hyper-parameters ──────────────────────────────────────────────────
-TOTAL_GAMES   = 100_000
+TOTAL_GAMES   = 10_000
 INITIAL_EPS   = 0.2
-DECAY_EVERY   = 10_000
-DECAY_FACTOR  = 0.9
+DECAY_EVERY   = 1_000
+DECAY_FACTOR  = 0.85
 LEARNING_RATE = 0.60
-SEARCH_DEPTH     = 2           # shallow for speed – depth-1 ≈ 800–1 000 gpm
-SAVE_INTERVAL = 100
-PRINT_EVERY   = 500
-TABLE_PATH    = "bot/eval_table.pkl"
+MOB_WEIGHT    = 0.05
+SEARCH_DEPTH  = 2           # shallow for speed – depth-1 ≈ 800–1 000 gpm
+POS_WEIGHT    = 0.8
+SAVE_INTERVAL = 1000
+PRINT_EVERY   = 100
+TABLE_PATH    = "bot/eval_table_zobrist_pruned.pkl"
 # ───────────────────────────────────────────────────────────────────────
 
 def play_one(bot_w, bot_b):
     board, hist = chess.Board(), []
     while not board.is_game_over():
-        hist.append((board.fen(), board.turn))
+        # record hash directly
+        hist.append((zobrist.hash(board), board.turn))
         mv = bot_w.choose_move(board) if board.turn else bot_b.choose_move(board)
         board.push(mv)
     return board.result(), hist
@@ -30,16 +34,22 @@ def main():
     bot_w = ChessBotAgent(
         exploration_rate=INITIAL_EPS,
         learning_rate=LEARNING_RATE,
+        mobility_weight=MOB_WEIGHT,
+        positional_weight=POS_WEIGHT,
         save_interval=SAVE_INTERVAL,
         table_path=TABLE_PATH,
-        search_depth=SEARCH_DEPTH
+        search_depth=SEARCH_DEPTH,
+        use_policy=False
     )
     bot_b = ChessBotAgent(
         exploration_rate=INITIAL_EPS,
         learning_rate=LEARNING_RATE,
+        mobility_weight=MOB_WEIGHT,
+        positional_weight=POS_WEIGHT,
         save_interval=SAVE_INTERVAL,
         table_path=TABLE_PATH,
-        search_depth=SEARCH_DEPTH
+        search_depth=SEARCH_DEPTH,
+        use_policy=False
     )
 
     white_wins = black_wins = draws = 0

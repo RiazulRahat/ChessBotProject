@@ -39,8 +39,10 @@ def main():
     engine = ChessEngine()
 
     human_color = chess.WHITE
-    bot   = ChessBotAgent(exploration_rate=0.0, learning_rate=0.8,
-                          save_interval=50, table_path="bot/eval_table.pkl", search_depth=3)
+    bot   = ChessBotAgent(exploration_rate=0.0, learning_rate=0.0,
+                          save_interval=50, table_path="bot/eval_table_zobrist.pkl", 
+                          search_depth=3, positional_weight=0.8, mobility_weight=0.05,
+                          use_quiescence=True, use_policy=True)
 
     running = True
     while running:
@@ -69,7 +71,7 @@ def main():
 
         # bot move
         if engine.board.turn != human_color and not engine.board.is_game_over():
-            mv = bot.choose_move(engine.board)
+            mv = mv = bot.choose_move_timed(engine.board, time_per_move=2.0)
             if mv:
                 game_history.append((engine.board.fen(), engine.board.turn == chess.WHITE))
                 move_history.append(engine.board.san(mv))

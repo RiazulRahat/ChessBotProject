@@ -1,7 +1,11 @@
 # bot/chess_bot.py
+import time
 import chess, random, pickle, os
+from bot.utils.zobrist import zobrist
+from bot.evaluation.positional_heuristics import positional_score
+from bot.utils.opening_book import load_opening_book
 
-TABLE_FILE = "bot/eval_table.pkl"    # shared pickle on disk
+TABLE_FILE = "bot/eval_table_zobrist_pruned.pkl"    # shared pickle on disk
 DRAW_BIAS  = 0.2                     # +0.2 from White’s PoV → draw
 
 INF = float("inf")
@@ -16,15 +20,23 @@ class ChessBotAgent:
 
     def __init__(self,
                  exploration_rate=0.1,
-                 learning_rate=0.05,
+                 learning_rate=0.05, mobility_weight=0.05,
                  save_interval=50,
                  table_path: str = TABLE_FILE,
-                 search_depth: int = 3):
+                 search_depth: int = 3,
+                 positional_weight: float = 1.0,
+                 use_policy: bool = True,
+                 use_quiescence: bool = False):     # added quiescence
         self.exploration_rate = exploration_rate
         self.learning_rate    = learning_rate
+        self.mobility_weight = mobility_weight
         self.save_interval    = save_interval
         self._table_path      = table_path
         self.search_depth     = max(1, search_depth)
+        self.positional_weight = positional_weight
+        self.use_policy       = use_policy
+        self.use_quiescence = use_quiescence
+
         self.games_since_save = 0
         self.evaluation_table = self._load_table()
         self.policy = {}
@@ -34,7 +46,11 @@ class ChessBotAgent:
                 self.policy = pickle.load(f)
         except FileNotFoundError:
             pass
-        print(f"Policy entries: {len(self.policy)}")
+
+        # Loading the book to the bot
+        book_path = os.path.join(os.path.dirname(__file__),
+                                 "opening_book.pkl")
+        self.opening_book = load_opening_book(book_path)
 
     # ───────── Evaluation ────────────────────────────────────────────────
     @staticmethod
@@ -46,15 +62,29 @@ class ChessBotAgent:
                    for p, v in vals.items())
 
     def _state_value(self, board: chess.Board) -> float:
-        return self.evaluation_table.get(board.fen(), self._material_score(board))
+        # 1) lookup by Zobrist hash; fallback to material
+        key  = zobrist.hash(board)
+        base = self.evaluation_table.get(key, self._material_score(board))
+        # 2) positional + mobility bonus
+        pos = positional_score(board)
+        return base + self.positional_weight * pos
 
     # ───────── Public move selection ─────────────────────────────────────
     def choose_move(self, board: chess.Board):
 
         fen = board.fen()
+
+        # 0) Opening book lookup
+        if fen in self.opening_book:
+            # pick randomly among book moves to add variety
+            uci_move = random.choice(self.opening_book[fen])
+            # print(f"[Book] {'White' if board.turn else 'Black'} plays {uci_move} from book")    # Debug line
+            return chess.Move.from_uci(uci_move)
+        
+
         # 1) instant lookup if we have it
-        if fen in self.policy:
-            return chess.Move.from_uci(self.policy[fen])
+        if self.use_policy and fen in self.policy:
+                return chess.Move.from_uci(self.policy[fen])
         
         """ε-greedy search to self.search_depth plies."""
         legal = list(board.legal_moves)
@@ -76,6 +106,8 @@ class ChessBotAgent:
 
     # ───────── Alpha-beta with move ordering ─────────────────────────────
     def _alphabeta(self, board, depth, alpha, beta, maximise_white):
+        if depth == 0 and self.use_quiescence and not board.is_game_over():
+            return self.quiesce(board, alpha, beta), None
         if depth == 0 or board.is_game_over():
             return self._state_value(board), None
 
@@ -97,6 +129,50 @@ class ChessBotAgent:
                     break                           # α cut-off
 
         return (alpha, best_move) if maximise_white == board.turn else (beta, best_move)
+    
+    def quiesce(self, board: chess.Board, alpha: float, beta: float, ply=0, max_ply=3) -> float:
+        """
+        Simple capture‐and‐check quiescence search.
+        """
+        stand = self._state_value(board)
+        if stand >= beta:
+            return beta
+        if alpha < stand:
+            alpha = stand
+
+        for mv in board.legal_moves:
+            if not board.is_capture(mv): continue
+            if ply >= max_ply: break
+            # only extend captures or checks
+            if not (board.is_capture(mv) or board.gives_check(mv)):
+                continue
+            board.push(mv)
+            score = -self.quiesce(board, -beta, -alpha)
+            board.pop()
+
+            if score >= beta:
+                return beta
+            if score > alpha:
+                alpha = score
+
+        return alpha
+    
+    def choose_move_timed(self, board: chess.Board, time_per_move: float):
+        """
+        Iterative‐deepening wrapper over _alphabeta that runs up to time_per_move seconds.
+        """
+        best_move = None
+        start     = time.time()
+        # You can iterate to some max depth (e.g. self.search_depth or a new max)
+        max_d = self.search_depth
+        for depth in range(1, max_d+1):
+            val, mv = self._alphabeta(board, depth, -INF, +INF, board.turn)
+            if mv:
+                best_move = mv
+            # stop if we’ve run out of time
+            if time.time() - start > time_per_move:
+                break
+        return best_move or random.choice(list(board.legal_moves))
 
     # simple MVV-LVA + checks first
     def _ordered_moves(self, board):
@@ -137,11 +213,11 @@ class ChessBotAgent:
         elif result == "0-1":  next_v = -1.0
         else:                  next_v = DRAW_BIAS
 
-        for fen, white_to_move in reversed(game_history):
-            target =  next_v if white_to_move else -next_v
-            old    = self.evaluation_table.get(fen, 0.0)
+        for zkey, white_to_move in reversed(game_history):
+            target = next_v if white_to_move else -next_v
+            old    = self.evaluation_table.get(zkey, 0.0)
             new    = old + self.learning_rate * (target - old)
-            self.evaluation_table[fen] = new
+            self.evaluation_table[zkey] = new
             next_v = new if white_to_move else -new
 
         self.games_since_save += 1
@@ -161,5 +237,6 @@ class ChessBotAgent:
 
     def _save_table(self):
         os.makedirs(os.path.dirname(self._table_path), exist_ok=True)
+        # save Zobrist-keyed table
         with open(self._table_path, "wb") as f:
             pickle.dump(self.evaluation_table, f)

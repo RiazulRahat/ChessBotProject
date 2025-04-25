@@ -189,3 +189,6 @@ bot/eval_table*.pkl
 
 # — Pygame assets —
 assets/
+
+# Ignore all Python pickle files
+*.pkl
