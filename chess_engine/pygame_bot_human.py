@@ -39,8 +39,8 @@ def main():
     engine = ChessEngine()
 
     human_color = chess.WHITE
-    bot   = ChessBotAgent(exploration_rate=0.1, learning_rate=0.8,
-                          save_interval=50, table_path="bot/eval_table.pkl")
+    bot   = ChessBotAgent(exploration_rate=0.0, learning_rate=0.8,
+                          save_interval=50, table_path="bot/eval_table.pkl", search_depth=3)
 
     running = True
     while running:

@@ -27,14 +27,6 @@ class ChessBotAgent:
         self.search_depth     = max(1, search_depth)
         self.games_since_save = 0
         self.evaluation_table = self._load_table()
-        self.policy = {}
-        policy_path = os.path.join(os.path.dirname(__file__), "policy_book.pkl")
-        try:
-            with open(policy_path, "rb") as f:
-                self.policy = pickle.load(f)
-        except FileNotFoundError:
-            pass
-        print(f"Policy entries: {len(self.policy)}")
 
     # ───────── Evaluation ────────────────────────────────────────────────
     @staticmethod
@@ -51,11 +43,6 @@ class ChessBotAgent:
     # ───────── Public move selection ─────────────────────────────────────
     def choose_move(self, board: chess.Board):
 
-        fen = board.fen()
-        # 1) instant lookup if we have it
-        if fen in self.policy:
-            return chess.Move.from_uci(self.policy[fen])
-        
         """ε-greedy search to self.search_depth plies."""
         legal = list(board.legal_moves)
         if not legal:
@@ -125,10 +112,6 @@ class ChessBotAgent:
             return (-victim_type, attacker_type)
 
         caps.sort(key=mvv_lva)
-        
-        # Randomizing the top move
-        random.shuffle(quiet)
-
         return caps + checks + quiet
 
     # ───────── TD-0 learning ─────────────────────────────────────────────
