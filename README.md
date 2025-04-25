@@ -22,42 +22,42 @@ pip install -r requirements.txt
 
 Usage:
 
-Self-Play Training
+  Self-Play Training
 
-# Fast bulk training (no quiescence)
-python -m bot.continuous_train
+    # Fast bulk training (no quiescence)
+    python -m bot.continuous_train
 
-# (Optional) Enable quiescence in training
-# edit bot/continuous_train.py: use_quiescence=True
+    # (Optional) Enable quiescence in training
+    edit bot/continuous_train.py: use_quiescence=True
 
-Policy Generation
+  Policy Generation
 
-# After training completes:
-python bot/build_policy.py
+    # After training completes:
+    python bot/build_policy.py
 
-Opening Book
+  Opening Book
 
-# Build opening_book.pkl from your PGN files:
-python scripts/build_opening_book.py
+    # Build opening_book.pkl from your PGN files:
+    python scripts/build_opening_book.py
 
-Eval-Table Conversion & Pruning
+  Eval-Table Conversion & Pruning
 
-# Convert FEN→Zobrist:
-python training/convert_eval_table_to_zobrist.py
+    # Convert FEN→Zobrist:
+    python training/convert_eval_table_to_zobrist.py
 
-# Prune low-value entries:
-python training/prune_eval_table.py
+    # Prune low-value entries:
+    python training/prune_eval_table.py
 
-Elo Evaluation
+  Elo Evaluation
 
-# Test bot vs Stockfish (e.g. 100 games):
-python evaluate_elo.py --games 100 --positional-weight 0.8
+    # Test bot vs Stockfish (e.g. 100 games):
+    python evaluate_elo.py --games 100 --positional-weight 0.8
 
-Human vs Bot GUI
+  Human vs Bot GUI
 
-python -m chess_engine.pygame_bot_human
+    python -m chess_engine.pygame_bot_human
 
-Use the GUI to play against the bot with the latest trained policy and heuristics.
+    Use the GUI to play against the bot with the latest trained policy and heuristics.
 
 
 Configuration:
@@ -65,4 +65,5 @@ Configuration:
 - Hyperparameters for training are in bot/continuous_train.py.
 - Heuristic weights (positional, mobility, safety) live in bot/evaluation/positional_heuristics.py.
 - Search settings (depth, quiescence, time-per-move) are in bot/chess_bot.py and pygame_bot_human.py.
+  
 Adjust these to tune difficulty or personality.
