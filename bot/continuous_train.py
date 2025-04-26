@@ -7,10 +7,10 @@ from bot.utils.zobrist import zobrist
 from bot.chess_bot import ChessBotAgent
 
 # ─── hyper-parameters ──────────────────────────────────────────────────
-TOTAL_GAMES   = 10_000
-INITIAL_EPS   = 0.2
-DECAY_EVERY   = 1_000
-DECAY_FACTOR  = 0.85
+TOTAL_GAMES   = 5_000
+INITIAL_EPS   = 0.25
+DECAY_EVERY   = 250
+DECAY_FACTOR  = 0.9
 LEARNING_RATE = 0.60
 MOB_WEIGHT    = 0.05
 SEARCH_DEPTH  = 2           # shallow for speed – depth-1 ≈ 800–1 000 gpm
@@ -57,13 +57,26 @@ def main():
 
     try:
         for g in range(1, TOTAL_GAMES + 1):
-            result, history = play_one(bot_w, bot_b)
+            # ── 1) Swap who is White vs. Black ───────────────────────
+            if g % 2 == 0:
+                white_bot, black_bot = bot_w, bot_b
+            else:
+                white_bot, black_bot = bot_b, bot_w
+
+            result, history = play_one(white_bot, black_bot)
 
             # update W–L–D counters
             if result == "1-0":
-                white_wins += 1
+                # if it was bot_w in White, that's a white-side win; 
+                # if it was bot_b in White, that's a black-side win
+                if white_bot is bot_w:
+                    white_wins += 1
+                else:
+                    black_wins += 1
             elif result == "0-1":
-                black_wins += 1
+                # black_bot won
+                if black_bot is bot_w:
+                    white_wins += 1
             else:
                 draws += 1
 
