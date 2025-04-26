@@ -17,7 +17,7 @@ SEARCH_DEPTH  = 2           # shallow for speed – depth-1 ≈ 800–1 000 gpm
 POS_WEIGHT    = 0.8
 SAVE_INTERVAL = 1000
 PRINT_EVERY   = 100
-TABLE_PATH    = "bot/eval_table_zobrist_pruned.pkl"
+TABLE_PATH    = "bot/evaluation_table_current/eval_table_zobrist_pruned.pkl"
 # ───────────────────────────────────────────────────────────────────────
 
 def play_one(bot_w, bot_b):

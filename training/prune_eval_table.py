@@ -2,8 +2,8 @@
 import os, pickle
 
 # ── Config ──────────────────────────────────────────────────────────────
-IN_PATH    = "bot/eval_table_zobrist.pkl"        # your live table
-BACKUP_DIR = "bot/backups"                       # where to stash old tables
+IN_PATH    = "bot/evaluation_table_current/eval_table_zobrist_pruned.pkl"        # your live table
+BACKUP_DIR = "bot/backup"                       # where to stash old tables
 THRESHOLD  = 0.02                                # pawn-unit cutoff
 OUT_PATH   = IN_PATH.replace(".pkl", "_pruned.pkl")
 # ────────────────────────────────────────────────────────────────────────

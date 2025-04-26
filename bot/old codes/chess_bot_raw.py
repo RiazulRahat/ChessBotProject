@@ -1,7 +1,7 @@
 # bot/chess_bot.py
 import chess, random, pickle, os
 
-TABLE_FILE = "bot/eval_table.pkl"    # shared pickle on disk
+TABLE_FILE = "bot/evaluation_table_current/eval_table_zobrist_pruned.pkl"    # shared pickle on disk
 DRAW_BIAS  = 0.2                     # +0.2 from White’s PoV → draw
 
 INF = float("inf")

@@ -4,7 +4,7 @@ import chess, chess.engine, chess.pgn
 
 # ─── Config ─────────────────────────────────────────────────────────────
 STOCKFISH_PATH    = shutil.which("stockfish") or sys.exit("stockfish not found")
-TABLE_PATH        = "bot/eval_table.pkl"
+TABLE_PATH        = "bot/evaluation_table_current/eval_table_zobrist_pruned.pkl"
 PGN_PATH          = "vs_stockfish.pgn"
 SF_ANALYZE_DEPTH  = 12       # Stockfish search depth for annotations
 ALPHA             = 0.5      # how strongly to pull your table toward SF values
