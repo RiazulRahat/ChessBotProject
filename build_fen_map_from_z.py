@@ -4,11 +4,11 @@ import chess
 from bot.utils.zobrist import zobrist
 from bot.evaluation.positional_heuristics import positional_score
 
-Z_TABLE_BACKUP = "bot/evaluation_table_current/eval_table_zobrist_backup_for_fen.pkl"
-FEN_MAP_OUT    = "bot/evaluation_table_current/fen_map_partial.pkl"
+Z_TABLE_BACKUP = "backups/eval_table_zobrist_pruned.pkl"
+FEN_MAP_OUT    = "backups/fen_map_partial.pkl"
 MAX_GAMES      = 20_000
-SAVE_EVERY     = 2_000
-EPSILON        = 0.05
+SAVE_EVERY     = 100
+EPSILON        = 0.02
 
 def select_move_depth1(board, z_table):
     moves = list(board.legal_moves)
@@ -37,6 +37,7 @@ def main():
         fen_map = {}
 
     start = time.time()
+    print(f"Starting mapping {MAX_GAMES:,} games…")
     for g in range(1, MAX_GAMES+1):
         board = chess.Board()
 
@@ -45,7 +46,7 @@ def main():
             if key in needed and key not in fen_map:
                 fen_map[key] = board.fen()
 
-            mv = select_move_depth1(board, z_table)
+            mv = random.choice(list(board.legal_moves))
             if mv is None: break
             board.push(mv)
 
