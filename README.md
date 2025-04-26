@@ -1,7 +1,7 @@
 > **NOTE:** This is a fork of [ChessBotProject](https://github.com/RiazulRahat/ChessBotProject).
 > Also Github version does not include pkl files
 
-# Chess Bot Project
+# Neurochess Bot
 
 A modular, self-learning chess engine built with TD(0) learning, Zobrist hashing, and positional heuristics, with support for:
 
