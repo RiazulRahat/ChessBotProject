@@ -10,6 +10,40 @@ DRAW_BIAS  = 0.2                     # +0.2 from White’s PoV → draw
 
 INF = float("inf")
 
+# ─── Tactical helper functions for quiescence ───────────────────────────
+PIECE_VALUES = {
+    chess.PAWN:   100,
+    chess.KNIGHT: 320,
+    chess.BISHOP: 330,
+    chess.ROOK:   500,
+    chess.QUEEN:  900,
+    chess.KING:   20000
+}
+
+def piece_value(piece: chess.Piece | None) -> int:
+    return PIECE_VALUES.get(piece.piece_type, 0) if piece else 0
+
+def victim_value(board: chess.Board, sq: chess.Square) -> int:
+    p = board.piece_at(sq)
+    return piece_value(p)
+
+def attacker_value(board: chess.Board, sq: chess.Square) -> int:
+    # MVV-LVA: least-valuable attacker first
+    attackers = [board.piece_at(sq2).piece_type
+                 for sq2 in board.attackers(board.turn, sq)]
+    if not attackers:
+        return 0
+    return min(PIECE_VALUES[t] for t in attackers)
+
+def see(board: chess.Board, move: chess.Move) -> bool:
+    try:
+        return board.see(move) >= 0
+    except AttributeError:
+        # fallback if python-chess <1.7
+        victim = piece_value(board.piece_at(move.to_square))
+        attacker = piece_value(board.piece_at(move.from_square))
+        return victim >= attacker
+# ────────────────────────────────────────────────────────────────────────
 
 class ChessBotAgent:
     """
@@ -130,6 +164,8 @@ class ChessBotAgent:
 
         return (alpha, best_move) if maximise_white == board.turn else (beta, best_move)
     
+    
+    
     def quiesce(self, board: chess.Board, alpha: float, beta: float, ply=0, max_ply=3) -> float:
         """
         Simple capture‐and‐check quiescence search.
@@ -140,14 +176,28 @@ class ChessBotAgent:
         if alpha < stand:
             alpha = stand
 
-        for mv in board.legal_moves:
-            if not board.is_capture(mv): continue
-            if ply >= max_ply: break
-            # only extend captures or checks
-            if not (board.is_capture(mv) or board.gives_check(mv)):
+        # gather & sort captures (MVV-LVA)
+        caps = [mv for mv in board.legal_moves if board.is_capture(mv)]
+        caps.sort(key=lambda m: (
+            -victim_value(board, m.to_square),
+            attacker_value(board, m.from_square)
+        ))
+
+        for mv in caps:
+            if ply >= max_ply:
                 continue
+
+            # optional: delta-pruning
+            gain = piece_value(board.piece_at(mv.to_square))
+            if stand + gain < alpha:
+                continue
+
+            # optional: static exchange eval
+            if not see(board, mv):
+                continue
+
             board.push(mv)
-            score = -self.quiesce(board, -beta, -alpha)
+            score = -self.quiesce(board, -beta, -alpha, ply+1, max_ply)
             board.pop()
 
             if score >= beta:
