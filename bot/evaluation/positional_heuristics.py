@@ -1,5 +1,14 @@
 import chess
 
+# ───---- global tuning constants ─────────────────────────────────────────
+MOBILITY_MAX            = 30    # how many moves this is relevant for
+MOBILITY_WEIGHT         = 0.05  # 0.05-0.1 - high mobility   0.05-0.02 - low mobility
+BISHOP_PAIR_BONUS       = 0.30  # 0.4-0.5 - favor bishop pair  0.15-0.2 - less power to bishops
+PASSED_PAWN_BONUS        = 0.20 # 0.3-0.4 - passed PAWNS   0.1-0.15 - careful pawn structure
+SAFETY_MULTIPLIER       = 1.0   # 1.2–1.5 - avoids hanging pieces   0.5–0.8 - can offer pieces
+KING_SHIELD_BONUS       = 0.25  # After castling pawn shield keeping rate
+# ────────────────────────────────────────────────────────────────────────
+
 # Piece-Square Tables (in centipawns)
 # Tables represent values for White; for Black, values are negated automatically.
 
@@ -107,7 +116,9 @@ def piece_square_bonus(board: chess.Board) -> float:
             table = KING_END_TABLE if total_material < 14 else KING_MID_TABLE
 
         if table:
-            val = table[sq] / 100.0  # convert centipawns to pawn units
+            # mirror the index for Black so we pick the correct orientation
+            idx = sq if p.color == chess.WHITE else chess.square_mirror(sq)
+            val = table[idx] / 100.0
             score += val if p.color == chess.WHITE else -val
     return score
 
@@ -134,24 +145,18 @@ def pawn_structure_penalty(board: chess.Board) -> float:
     return penalty
 
 def piece_safety_penalty(board: chess.Board) -> float:
-    """
-    Penalize any undefended piece that is attacked.
-    Returns positive value (bad for White if undefended White piece).
-    """
     penalty = 0.0
     for sq in chess.SQUARES:
         p = board.piece_at(sq)
         if not p:
             continue
-        # count attackers vs defenders
         attackers = board.attackers(not p.color, sq)
-        if attackers:
-            defenders = board.attackers(p.color, sq)
-            # if no defenders, heavier penalty; if fewer defenders than attackers, smaller
-            if not defenders:
-                penalty += (p.piece_type * 0.5) * (1 if p.color == chess.WHITE else -1)
-            elif len(defenders) < len(attackers):
-                penalty += ((len(attackers) - len(defenders)) * 0.1 * p.piece_type) * (1 if p.color == chess.WHITE else -1)
+        defenders = board.attackers(p.color, sq)
+        if attackers and not defenders:
+            penalty += p.piece_type * SAFETY_MULTIPLIER * (1 if p.color==chess.WHITE else -1)
+        elif attackers and len(defenders) < len(attackers):
+            penalty += ((len(attackers)-len(defenders)) * 0.1 * p.piece_type
+                       ) * (1 if p.color==chess.WHITE else -1)
     return penalty
 
 def king_safety_bonus(board: chess.Board) -> float:
@@ -196,18 +201,63 @@ def piece_development_bonus(board: chess.Board) -> float:
 
 
 
-def positional_score(board: chess.Board, mobility_weight: float = 0.05) -> float:
+def passed_pawn_bonus(board: chess.Board) -> float:
+    bonus = 0.0
+    for color in (chess.WHITE, chess.BLACK):
+        for sq in board.pieces(chess.PAWN, color):
+            file = sq % 8
+            rank = sq // 8
+            # White: no black pawn on same file ahead
+            ahead = range(rank+1, 8) if color==chess.WHITE else range(rank-1, -1, -1)
+            if all(not board.piece_at(f*8 + file) 
+                   or board.piece_at(f*8 + file).color==color
+                   for f in ahead):
+                bonus += PASSED_PAWN_BONUS * (1 if color==chess.WHITE else -1)
+    return bonus
+
+def bishop_pair_bonus(board: chess.Board) -> float:
+    bonus = 0.0
+    for color in (chess.WHITE, chess.BLACK):
+        bishops = len(board.pieces(chess.BISHOP, color))
+        if bishops >= 2:
+            bonus += BISHOP_PAIR_BONUS * (1 if color==chess.WHITE else -1)
+    return bonus
+
+def positional_score(board: chess.Board) -> float:
     """
-    Combined positional score:
-      - piece-square bonuses
-      - pawn-structure penalties
-      - mobility bonus
-    Returns a score in pawn units (White positive).
+    Combined positional score in pawn units (White positive).
     """
-    pst = piece_square_bonus(board)
-    pawnp = pawn_structure_penalty(board)
-    safetyp = piece_safety_penalty(board) * 5.0
-    mob = len(list(board.legal_moves)) * mobility_weight
-    kingpb = king_safety_bonus(board)
-    devpb  = piece_development_bonus(board)
-    return pst - pawnp - safetyp + mob + 0.8*kingpb + 0.5*devpb
+    pst     = piece_square_bonus(board)
+    pawnp   = pawn_structure_penalty(board)
+    safety  = piece_safety_penalty(board)
+    dev     = piece_development_bonus(board)
+    kingpb  = king_safety_bonus(board)
+    # new bonuses
+    bp_bonus    = bishop_pair_bonus(board)
+    pp_bonus    = passed_pawn_bonus(board)
+
+    # normalized mobility
+    # clamp and avoid list allocation
+    moves = min(len(board.legal_moves), MOBILITY_MAX)
+    mob   = (moves / MOBILITY_MAX) * MOBILITY_WEIGHT
+
+    # pawn shield: award +0.25 for White, –0.25 for Black if king is castled and front pawn intact
+    shield = 0.0
+    for color, ksquare, pawn_sq in [
+        (chess.WHITE, chess.G1, chess.F2),
+        (chess.BLACK, chess.G8, chess.F7)
+    ]:
+        if board.king(color) == ksquare and board.piece_at(pawn_sq):
+            shield += KING_SHIELD_BONUS * (1 if color == chess.WHITE else -1)
+
+    return (
+        pst
+      - pawnp
+      - safety
+      + mob
+      + 0.8 * kingpb
+      + 0.5 * dev
+      + bp_bonus
+      + pp_bonus
+      + shield
+    )
