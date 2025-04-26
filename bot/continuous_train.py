@@ -24,7 +24,7 @@ def play_one(bot_w, bot_b):
     board, hist = chess.Board(), []
     while not board.is_game_over():
         # record hash directly
-        hist.append((zobrist.hash(board), board.turn))
+        hist.append((zobrist.hash(board), board.turn, board.fen()))
         mv = bot_w.choose_move(board) if board.turn else bot_b.choose_move(board)
         board.push(mv)
     return board.result(), hist
