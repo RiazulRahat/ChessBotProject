@@ -238,7 +238,8 @@ def positional_score(board: chess.Board) -> float:
 
     # normalized mobility
     # clamp and avoid list allocation
-    moves = min(len(board.legal_moves), MOBILITY_MAX)
+    moves = board.legal_moves.count()
+    moves = min(moves, MOBILITY_MAX)
     mob   = (moves / MOBILITY_MAX) * MOBILITY_WEIGHT
 
     # pawn shield: award +0.25 for White, –0.25 for Black if king is castled and front pawn intact
