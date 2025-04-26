@@ -73,6 +73,7 @@ class ChessBotAgent:
 
         self.games_since_save = 0
         self.evaluation_table = self._load_table()
+        self.zkey_to_fen = {}
         self.policy = {}
         policy_path = os.path.join(os.path.dirname(__file__), "policy_book.pkl")
         try:
@@ -290,3 +291,6 @@ class ChessBotAgent:
         # save Zobrist-keyed table
         with open(self._table_path, "wb") as f:
             pickle.dump(self.evaluation_table, f)
+
+        with open(self._table_path.replace(".pkl", "_zkey2fen.pkl"), "wb") as f:
+            pickle.dump(self.zkey_to_fen, f)
