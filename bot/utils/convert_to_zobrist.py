@@ -5,9 +5,9 @@ import chess
 from bot.utils.zobrist import zobrist
 
 # Paths
-OLD_TABLE = "bot/eval_table.pkl"
+OLD_TABLE = "bot/evaluation_table_files/eval_table_backup2.pkl"
 BACKUP    = "bot/eval_table_backup.pkl"
-NEW_TABLE = "bot/eval_table_zobrist.pkl"
+NEW_TABLE = "bot/evaluation_table_current/eval_table_zobrist_pruned.pkl"
 
 # 1) Backup old table
 shutil.copy(OLD_TABLE, BACKUP)

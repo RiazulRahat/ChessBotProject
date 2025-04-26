@@ -12,7 +12,7 @@ from bot.utils.zobrist import zobrist
 #  - FEN backup (your original eval_table.pkl before conversion)
 #  - ZOBRIST table (your live table)
 FEN_BACKUP_PATH      = "bot/evaluation_table_files/eval_table_backup2.pkl"
-ZOBRIST_TABLE_PATH   = "bot/eval_table_zobrist.pkl"
+ZOBRIST_TABLE_PATH   = "bot/evaluation_table_current/eval_table_zobrist_pruned.pkl"
 POLICY_PATH          = "bot/policy_book.pkl"
 
 def material_score(board: chess.Board) -> float:

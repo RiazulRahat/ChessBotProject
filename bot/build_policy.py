@@ -1,3 +1,5 @@
+### This is the old way for building policy on FEN tables ###
+
 # bot/build_policy.py
 import os
 import math
@@ -6,9 +8,9 @@ import time
 import chess
 
 # where your eval_table lives
-TABLE_PATH  = os.path.join(os.path.dirname(__file__), "eval_table.pkl")
+TABLE_PATH  = os.path.join(os.path.dirname(__file__), "bot/evaluation_table_current/eval_table_zobrist_pruned.pkl")
 # output policy book here
-POLICY_PATH = os.path.join(os.path.dirname(__file__), "policy_book.pkl")
+POLICY_PATH = os.path.join(os.path.dirname(__file__), "bot/policy_book.pkl")
 
 def material_score(board: chess.Board) -> float:
     vals = {chess.PAWN:1, chess.KNIGHT:3, chess.BISHOP:3,

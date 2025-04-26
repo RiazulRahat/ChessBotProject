@@ -5,7 +5,7 @@ from bot.utils.zobrist import zobrist
 from bot.evaluation.positional_heuristics import positional_score
 from bot.utils.opening_book import load_opening_book
 
-TABLE_FILE = "bot/eval_table_zobrist_pruned.pkl"    # shared pickle on disk
+TABLE_FILE = "bot/evaluation_table_current/eval_table_zobrist_pruned.pkl"    # shared pickle on disk
 DRAW_BIAS  = 0.2                     # +0.2 from White’s PoV → draw
 
 INF = float("inf")
