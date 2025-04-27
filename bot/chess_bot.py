@@ -323,6 +323,7 @@ class ChessBotAgent:
             pickle.dump(self.zkey_stats, f)
 
 
+<<<<<<< HEAD
     def prune_table(self, max_entries: int, min_visits: int = 0):
         """
         Prune evaluation_table so it ends up with at most `max_entries` entries:
@@ -382,3 +383,26 @@ class ChessBotAgent:
             f"Pruned to {len(self.evaluation_table)} entries "
             f"(target ≤ {max_entries}, min_visits={min_visits})."
         )
+=======
+
+    def prune_table(self, max_entries: int):
+        """
+        Keep only the top `max_entries` keys by visit count.
+        This will trim evaluation_table, zkey_to_fen, and zkey_stats.
+        """
+        # sort keys by visits descending
+        sorted_keys = sorted(
+            self.zkey_stats.items(),
+            key=lambda kv: kv[1]["visits"],
+            reverse=True
+        )
+        keep = {k for k,_ in sorted_keys[:max_entries]}
+
+        # prune evaluation_table
+        self.evaluation_table = {k: v for k,v in self.evaluation_table.items() if k in keep}
+        # prune zkey→fen
+        self.zkey_to_fen   = {k: f for k,f in self.zkey_to_fen.items() if k in keep}
+        # prune stats
+        self.zkey_stats    = {k: s for k,s in self.zkey_stats.items() if k in keep}
+        print(f"Pruned to {len(self.evaluation_table)} entries (cap {max_entries}).")
+>>>>>>> origin/main

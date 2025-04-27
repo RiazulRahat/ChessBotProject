@@ -7,8 +7,13 @@ from bot.utils.zobrist import zobrist
 from bot.chess_bot import ChessBotAgent
 
 # ─── hyper-parameters ──────────────────────────────────────────────────
+<<<<<<< HEAD
 TOTAL_GAMES   = 28_000
 INITIAL_EPS   = 0.065
+=======
+TOTAL_GAMES   = 50_000
+INITIAL_EPS   = 0.20
+>>>>>>> origin/main
 DECAY_EVERY   = 1000
 DECAY_FACTOR  = 0.95
 LEARNING_RATE = 0.25
