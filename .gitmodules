@@ -1,0 +1,3 @@
+[submodule "training_model/lichess-bot"]
+	path = training_model/lichess-bot
+	url = https://github.com/careless25/lichess-bot.git

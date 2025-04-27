@@ -1,5 +1,6 @@
 # bot/chess_bot.py
 import time
+import datetime
 import chess, random, pickle, os
 from bot.utils.zobrist import zobrist
 from bot.evaluation.positional_heuristics import positional_score
@@ -10,6 +11,40 @@ DRAW_BIAS  = 0.2                     # +0.2 from White’s PoV → draw
 
 INF = float("inf")
 
+# ─── Tactical helper functions for quiescence ───────────────────────────
+PIECE_VALUES = {
+    chess.PAWN:   100,
+    chess.KNIGHT: 320,
+    chess.BISHOP: 330,
+    chess.ROOK:   500,
+    chess.QUEEN:  900,
+    chess.KING:   20000
+}
+
+def piece_value(piece: chess.Piece | None) -> int:
+    return PIECE_VALUES.get(piece.piece_type, 0) if piece else 0
+
+def victim_value(board: chess.Board, sq: chess.Square) -> int:
+    p = board.piece_at(sq)
+    return piece_value(p)
+
+def attacker_value(board: chess.Board, sq: chess.Square) -> int:
+    # MVV-LVA: least-valuable attacker first
+    attackers = [board.piece_at(sq2).piece_type
+                 for sq2 in board.attackers(board.turn, sq)]
+    if not attackers:
+        return 0
+    return min(PIECE_VALUES[t] for t in attackers)
+
+def see(board: chess.Board, move: chess.Move) -> bool:
+    try:
+        return board.see(move) >= 0
+    except AttributeError:
+        # fallback if python-chess <1.7
+        victim = piece_value(board.piece_at(move.to_square))
+        attacker = piece_value(board.piece_at(move.from_square))
+        return victim >= attacker
+# ────────────────────────────────────────────────────────────────────────
 
 class ChessBotAgent:
     """
@@ -39,6 +74,17 @@ class ChessBotAgent:
 
         self.games_since_save = 0
         self.evaluation_table = self._load_table()
+        fen_path = self._table_path.replace(".pkl", "_zkey2fen.pkl")
+        if os.path.exists(fen_path):
+            with open(fen_path, "rb") as f:
+                self.zkey_to_fen = pickle.load(f)
+        else:
+            self.zkey_to_fen = {}
+        self.zkey_stats    = {}
+        stats_path = self._table_path.replace(".pkl", "_stats.pkl")
+        if os.path.exists(stats_path):
+            with open(stats_path, "rb") as f:
+                self.zkey_stats = pickle.load(f)
         self.policy = {}
         policy_path = os.path.join(os.path.dirname(__file__), "policy_book.pkl")
         try:
@@ -64,6 +110,10 @@ class ChessBotAgent:
     def _state_value(self, board: chess.Board) -> float:
         # 1) lookup by Zobrist hash; fallback to material
         key  = zobrist.hash(board)
+        # ensure every key gets a FEN mapping, even if we never update it
+        if key in self.evaluation_table:
+            self.zkey_to_fen.setdefault(key, board.fen())
+        
         base = self.evaluation_table.get(key, self._material_score(board))
         # 2) positional + mobility bonus
         pos = positional_score(board)
@@ -130,6 +180,8 @@ class ChessBotAgent:
 
         return (alpha, best_move) if maximise_white == board.turn else (beta, best_move)
     
+    
+    
     def quiesce(self, board: chess.Board, alpha: float, beta: float, ply=0, max_ply=3) -> float:
         """
         Simple capture‐and‐check quiescence search.
@@ -140,14 +192,28 @@ class ChessBotAgent:
         if alpha < stand:
             alpha = stand
 
-        for mv in board.legal_moves:
-            if not board.is_capture(mv): continue
-            if ply >= max_ply: break
-            # only extend captures or checks
-            if not (board.is_capture(mv) or board.gives_check(mv)):
+        # gather & sort captures (MVV-LVA)
+        caps = [mv for mv in board.legal_moves if board.is_capture(mv)]
+        caps.sort(key=lambda m: (
+            -victim_value(board, m.to_square),
+            attacker_value(board, m.from_square)
+        ))
+
+        for mv in caps:
+            if ply >= max_ply:
                 continue
+
+            # optional: delta-pruning
+            gain = piece_value(board.piece_at(mv.to_square))
+            if stand + gain < alpha:
+                continue
+
+            # optional: static exchange eval
+            if not see(board, mv):
+                continue
+
             board.push(mv)
-            score = -self.quiesce(board, -beta, -alpha)
+            score = -self.quiesce(board, -beta, -alpha, ply+1, max_ply)
             board.pop()
 
             if score >= beta:
@@ -213,11 +279,18 @@ class ChessBotAgent:
         elif result == "0-1":  next_v = -1.0
         else:                  next_v = DRAW_BIAS
 
-        for zkey, white_to_move in reversed(game_history):
+        for zkey, white_to_move, fen in reversed(game_history):
             target = next_v if white_to_move else -next_v
             old    = self.evaluation_table.get(zkey, 0.0)
             new    = old + self.learning_rate * (target - old)
             self.evaluation_table[zkey] = new
+            # record the FEN (only first occurrence is kept)
+            self.zkey_to_fen.setdefault(zkey, fen)
+            # update per-key stats
+            stats = self.zkey_stats.get(zkey, {"visits": 0, "last_seen": None})
+            stats["visits"]   += 1
+            stats["last_seen"] = datetime.datetime.utcnow().timestamp()
+            self.zkey_stats[zkey] = stats
             next_v = new if white_to_move else -new
 
         self.games_since_save += 1
@@ -240,3 +313,34 @@ class ChessBotAgent:
         # save Zobrist-keyed table
         with open(self._table_path, "wb") as f:
             pickle.dump(self.evaluation_table, f)
+
+        with open(self._table_path.replace(".pkl", "_zkey2fen.pkl"), "wb") as f:
+            pickle.dump(self.zkey_to_fen, f)
+
+        # also save per-key stats
+        stats_path = self._table_path.replace(".pkl", "_stats.pkl")
+        with open(stats_path, "wb") as f:
+            pickle.dump(self.zkey_stats, f)
+
+
+
+    def prune_table(self, max_entries: int):
+        """
+        Keep only the top `max_entries` keys by visit count.
+        This will trim evaluation_table, zkey_to_fen, and zkey_stats.
+        """
+        # sort keys by visits descending
+        sorted_keys = sorted(
+            self.zkey_stats.items(),
+            key=lambda kv: kv[1]["visits"],
+            reverse=True
+        )
+        keep = {k for k,_ in sorted_keys[:max_entries]}
+
+        # prune evaluation_table
+        self.evaluation_table = {k: v for k,v in self.evaluation_table.items() if k in keep}
+        # prune zkey→fen
+        self.zkey_to_fen   = {k: f for k,f in self.zkey_to_fen.items() if k in keep}
+        # prune stats
+        self.zkey_stats    = {k: s for k,s in self.zkey_stats.items() if k in keep}
+        print(f"Pruned to {len(self.evaluation_table)} entries (cap {max_entries}).")
