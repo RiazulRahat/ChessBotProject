@@ -3,7 +3,7 @@ from bot.utils.opening_book import build_opening_book, save_opening_book
 
 # List your PGN files here:
 pgn_files = [
-    "books/caro_kann.pgn",
+    "book_library/black_opening/caro_kann.pgn",
     # add as many as you like
 ]
 
