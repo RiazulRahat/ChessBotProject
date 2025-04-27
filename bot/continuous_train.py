@@ -7,11 +7,11 @@ from bot.utils.zobrist import zobrist
 from bot.chess_bot import ChessBotAgent
 
 # ─── hyper-parameters ──────────────────────────────────────────────────
-TOTAL_GAMES   = 50_000
-INITIAL_EPS   = 0.20
+TOTAL_GAMES   = 28_000
+INITIAL_EPS   = 0.065
 DECAY_EVERY   = 1000
 DECAY_FACTOR  = 0.95
-LEARNING_RATE = 0.25
+LEARNING_RATE = 0.1
 MOB_WEIGHT    = 0.05
 SEARCH_DEPTH  = 2        
 POS_WEIGHT    = 0.5
