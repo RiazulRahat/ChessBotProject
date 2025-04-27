@@ -7,14 +7,14 @@ from bot.utils.zobrist import zobrist
 from bot.chess_bot import ChessBotAgent
 
 # ─── hyper-parameters ──────────────────────────────────────────────────
-TOTAL_GAMES   = 8_000
-INITIAL_EPS   = 0.10
-DECAY_EVERY   = 500
-DECAY_FACTOR  = 0.90
-LEARNING_RATE = 0.30
+TOTAL_GAMES   = 50_000
+INITIAL_EPS   = 0.20
+DECAY_EVERY   = 1000
+DECAY_FACTOR  = 0.95
+LEARNING_RATE = 0.25
 MOB_WEIGHT    = 0.05
-SEARCH_DEPTH  = 3         
-POS_WEIGHT    = 0.8
+SEARCH_DEPTH  = 2        
+POS_WEIGHT    = 0.5
 SAVE_INTERVAL = 2000
 PRINT_EVERY   = 200
 TABLE_PATH    = "bot/evaluation_table_current/eval_table_zobrist_pruned.pkl"

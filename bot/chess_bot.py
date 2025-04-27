@@ -1,5 +1,6 @@
 # bot/chess_bot.py
 import time
+import datetime
 import chess, random, pickle, os
 from bot.utils.zobrist import zobrist
 from bot.evaluation.positional_heuristics import positional_score
@@ -73,7 +74,17 @@ class ChessBotAgent:
 
         self.games_since_save = 0
         self.evaluation_table = self._load_table()
-        self.zkey_to_fen = {}
+        fen_path = self._table_path.replace(".pkl", "_zkey2fen.pkl")
+        if os.path.exists(fen_path):
+            with open(fen_path, "rb") as f:
+                self.zkey_to_fen = pickle.load(f)
+        else:
+            self.zkey_to_fen = {}
+        self.zkey_stats    = {}
+        stats_path = self._table_path.replace(".pkl", "_stats.pkl")
+        if os.path.exists(stats_path):
+            with open(stats_path, "rb") as f:
+                self.zkey_stats = pickle.load(f)
         self.policy = {}
         policy_path = os.path.join(os.path.dirname(__file__), "policy_book.pkl")
         try:
@@ -99,6 +110,10 @@ class ChessBotAgent:
     def _state_value(self, board: chess.Board) -> float:
         # 1) lookup by Zobrist hash; fallback to material
         key  = zobrist.hash(board)
+        # ensure every key gets a FEN mapping, even if we never update it
+        if key in self.evaluation_table:
+            self.zkey_to_fen.setdefault(key, board.fen())
+        
         base = self.evaluation_table.get(key, self._material_score(board))
         # 2) positional + mobility bonus
         pos = positional_score(board)
@@ -264,11 +279,18 @@ class ChessBotAgent:
         elif result == "0-1":  next_v = -1.0
         else:                  next_v = DRAW_BIAS
 
-        for zkey, white_to_move in reversed(game_history):
+        for zkey, white_to_move, fen in reversed(game_history):
             target = next_v if white_to_move else -next_v
             old    = self.evaluation_table.get(zkey, 0.0)
             new    = old + self.learning_rate * (target - old)
             self.evaluation_table[zkey] = new
+            # record the FEN (only first occurrence is kept)
+            self.zkey_to_fen.setdefault(zkey, fen)
+            # update per-key stats
+            stats = self.zkey_stats.get(zkey, {"visits": 0, "last_seen": None})
+            stats["visits"]   += 1
+            stats["last_seen"] = datetime.datetime.utcnow().timestamp()
+            self.zkey_stats[zkey] = stats
             next_v = new if white_to_move else -new
 
         self.games_since_save += 1
@@ -294,3 +316,31 @@ class ChessBotAgent:
 
         with open(self._table_path.replace(".pkl", "_zkey2fen.pkl"), "wb") as f:
             pickle.dump(self.zkey_to_fen, f)
+
+        # also save per-key stats
+        stats_path = self._table_path.replace(".pkl", "_stats.pkl")
+        with open(stats_path, "wb") as f:
+            pickle.dump(self.zkey_stats, f)
+
+
+
+    def prune_table(self, max_entries: int):
+        """
+        Keep only the top `max_entries` keys by visit count.
+        This will trim evaluation_table, zkey_to_fen, and zkey_stats.
+        """
+        # sort keys by visits descending
+        sorted_keys = sorted(
+            self.zkey_stats.items(),
+            key=lambda kv: kv[1]["visits"],
+            reverse=True
+        )
+        keep = {k for k,_ in sorted_keys[:max_entries]}
+
+        # prune evaluation_table
+        self.evaluation_table = {k: v for k,v in self.evaluation_table.items() if k in keep}
+        # prune zkey→fen
+        self.zkey_to_fen   = {k: f for k,f in self.zkey_to_fen.items() if k in keep}
+        # prune stats
+        self.zkey_stats    = {k: s for k,s in self.zkey_stats.items() if k in keep}
+        print(f"Pruned to {len(self.evaluation_table)} entries (cap {max_entries}).")
