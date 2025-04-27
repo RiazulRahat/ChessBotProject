@@ -323,24 +323,62 @@ class ChessBotAgent:
             pickle.dump(self.zkey_stats, f)
 
 
+    def prune_table(self, max_entries: int, min_visits: int = 0):
+        """
+        Prune evaluation_table so it ends up with at most `max_entries` entries:
+        1. Keep every key that has no fen mapping (we never drop these).
+        2. Of the remaining mapped-and-eligible keys (visits ≥ min_visits),
+            keep the top (max_entries - num_unmapped) by visit count.
+        3. Drop all mapped keys whose visit count < min_visits.
+        4. Finally, drop everything else from evaluation_table, zkey_to_fen, and zkey_stats.
+        """
+        # 1) collect unmapped (always keep)
+        unmapped = set(self.evaluation_table) - set(self.zkey_to_fen)
+        num_unmapped = len(unmapped)
 
-    def prune_table(self, max_entries: int):
-        """
-        Keep only the top `max_entries` keys by visit count.
-        This will trim evaluation_table, zkey_to_fen, and zkey_stats.
-        """
-        # sort keys by visits descending
-        sorted_keys = sorted(
-            self.zkey_stats.items(),
-            key=lambda kv: kv[1]["visits"],
+        # 2) filter mapped keys by min_visits
+        #    (only consider keys that both have a fen mapping and a stats entry)
+        eligible_mapped = {
+            k for k in self.evaluation_table
+            if (k in self.zkey_to_fen
+                and k in self.zkey_stats
+                and self.zkey_stats[k]["visits"] >= min_visits)
+        }
+
+        # 3) how many “visited” slots remain?
+        slots_for_visited = max_entries - num_unmapped
+        if slots_for_visited < 0:
+            # too many unmapped → keep them all, drop all mapped
+            slots_for_visited = 0
+            print(
+                f"Warning: {num_unmapped} unmapped entries > max_entries={max_entries}. "
+                "Keeping all unmapped; dropping all mapped."
+            )
+
+        # 4) pick the top‐visited among eligible_mapped
+        #    sort by visits descending, then slice
+        sorted_by_visits = sorted(
+            eligible_mapped,
+            key=lambda k: self.zkey_stats[k]["visits"],
             reverse=True
         )
-        keep = {k for k,_ in sorted_keys[:max_entries]}
+        top_mapped = set(sorted_by_visits[:slots_for_visited])
 
-        # prune evaluation_table
-        self.evaluation_table = {k: v for k,v in self.evaluation_table.items() if k in keep}
-        # prune zkey→fen
-        self.zkey_to_fen   = {k: f for k,f in self.zkey_to_fen.items() if k in keep}
-        # prune stats
-        self.zkey_stats    = {k: s for k,s in self.zkey_stats.items() if k in keep}
-        print(f"Pruned to {len(self.evaluation_table)} entries (cap {max_entries}).")
+        # 5) final keep set = unmapped ∪ top_mapped
+        keep = unmapped | top_mapped
+
+        # 6) prune all three tables
+        self.evaluation_table = {
+            k: v for k, v in self.evaluation_table.items() if k in keep
+        }
+        self.zkey_to_fen = {
+            k: f for k, f in self.zkey_to_fen.items() if k in keep
+        }
+        self.zkey_stats = {
+            k: s for k, s in self.zkey_stats.items() if k in keep
+        }
+
+        print(
+            f"Pruned to {len(self.evaluation_table)} entries "
+            f"(target ≤ {max_entries}, min_visits={min_visits})."
+        )
