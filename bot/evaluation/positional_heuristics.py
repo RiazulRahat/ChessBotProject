@@ -13,9 +13,10 @@ KING_SHIELD_BONUS       = 0.25  # After castling pawn shield keeping rate
 
 
 
-# Definition:
+""" Definition:
 #       1. Centipawn :   a unit of measurement used to quantify a player's advantage 
 #                       in a chess position. It's equal to 1/100th of a pawn.
+#         ( For Piece Tables )
 #
 # Functions:
 #
@@ -42,7 +43,7 @@ KING_SHIELD_BONUS       = 0.25  # After castling pawn shield keeping rate
 #      ***
 #      8. positional_score        : ( chess.Board ) -> FLOAT
 #         - Adds all the Previous bonuses and penalties
-#
+"""
 
 
 

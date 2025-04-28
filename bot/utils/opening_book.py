@@ -1,3 +1,10 @@
+# opening_book.py
+
+# FUNCTIONS:  (1) Build | (2) Save | (3) Load   -->  Opening books
+# (1) build_opening_book : I : pgn_path, max_depth(of path)  |     O :  Return book (dict)
+# (2) save_opening_book  : I : book, filepath                |     O :  N/A (add to pkl file)
+# (3) load_opening_book  : I : filepath                      |     O :  N/A (open for read)
+
 import chess
 import chess.pgn
 import pickle
