@@ -81,6 +81,7 @@ class ChessBotAgent:
         else:
             self.zkey_to_fen = {}
         self.zkey_stats    = {}
+        self.tt = {}  
         stats_path = self._table_path.replace(".pkl", "_stats.pkl")
         if os.path.exists(stats_path):
             with open(stats_path, "rb") as f:
@@ -154,8 +155,13 @@ class ChessBotAgent:
                                   maximise_white=maximise_white)
         return best or random.choice(legal)
 
+
     # ───────── Alpha-beta with move ordering ─────────────────────────────
     def _alphabeta(self, board, depth, alpha, beta, maximise_white):
+        key = zobrist.hash(board)
+        if key in self.tt and self.tt[key][0] >= depth:
+            return self.tt[key][1], self.tt[key][2]
+
         if depth == 0 and self.use_quiescence and not board.is_game_over():
             return self.quiesce(board, alpha, beta), None
         if depth == 0 or board.is_game_over():
@@ -178,7 +184,9 @@ class ChessBotAgent:
                 if beta <= alpha:
                     break                           # α cut-off
 
-        return (alpha, best_move) if maximise_white == board.turn else (beta, best_move)
+        val = alpha if maximise_white == board.turn else beta
+        self.tt[key] = (depth, val, best_move)
+        return val, best_move
     
     
     
@@ -323,7 +331,6 @@ class ChessBotAgent:
             pickle.dump(self.zkey_stats, f)
 
 
-<<<<<<< HEAD
     def prune_table(self, max_entries: int, min_visits: int = 0):
         """
         Prune evaluation_table so it ends up with at most `max_entries` entries:
@@ -383,26 +390,3 @@ class ChessBotAgent:
             f"Pruned to {len(self.evaluation_table)} entries "
             f"(target ≤ {max_entries}, min_visits={min_visits})."
         )
-=======
-
-    def prune_table(self, max_entries: int):
-        """
-        Keep only the top `max_entries` keys by visit count.
-        This will trim evaluation_table, zkey_to_fen, and zkey_stats.
-        """
-        # sort keys by visits descending
-        sorted_keys = sorted(
-            self.zkey_stats.items(),
-            key=lambda kv: kv[1]["visits"],
-            reverse=True
-        )
-        keep = {k for k,_ in sorted_keys[:max_entries]}
-
-        # prune evaluation_table
-        self.evaluation_table = {k: v for k,v in self.evaluation_table.items() if k in keep}
-        # prune zkey→fen
-        self.zkey_to_fen   = {k: f for k,f in self.zkey_to_fen.items() if k in keep}
-        # prune stats
-        self.zkey_stats    = {k: s for k,s in self.zkey_stats.items() if k in keep}
-        print(f"Pruned to {len(self.evaluation_table)} entries (cap {max_entries}).")
->>>>>>> origin/main
