@@ -7,15 +7,17 @@ from bot.utils.zobrist import zobrist
 from bot.chess_bot import ChessBotAgent
 
 # ─── hyper-parameters ──────────────────────────────────────────────────
-TOTAL_GAMES   = 5_000
-INITIAL_EPS   = 0.10
-DECAY_EVERY   = 500
+TOTAL_GAMES   = 2_000
+INITIAL_EPS   = 0.05
+DECAY_EVERY   = 250
 DECAY_FACTOR  = 0.90
-LEARNING_RATE = 0.25
+LEARNING_RATE = 0.20
 MOB_WEIGHT    = 0.05
-SEARCH_DEPTH  = 3        
-POS_WEIGHT    = 0.5
-SAVE_INTERVAL = 1000
+POS_WEIGHT    = 0.50
+SEARCH_DEPTH  = 3   
+USE_QUIESCENCE   = True 
+QUIESCENCE_DEPTH = 5    
+SAVE_INTERVAL = 500
 PRINT_EVERY   = 100
 TABLE_PATH    = "bot/evaluation_table_current/eval_table_zobrist_pruned.pkl"
 # ───────────────────────────────────────────────────────────────────────
@@ -37,6 +39,7 @@ def main():
         mobility_weight=MOB_WEIGHT,
         positional_weight=POS_WEIGHT,
         save_interval=SAVE_INTERVAL,
+        use_quiescence=USE_QUIESCENCE,
         table_path=TABLE_PATH,
         search_depth=SEARCH_DEPTH,
         use_policy=False
@@ -46,6 +49,7 @@ def main():
         learning_rate=LEARNING_RATE,
         mobility_weight=MOB_WEIGHT,
         positional_weight=POS_WEIGHT,
+        use_quiescence=USE_QUIESCENCE,
         save_interval=SAVE_INTERVAL,
         table_path=TABLE_PATH,
         search_depth=SEARCH_DEPTH,
