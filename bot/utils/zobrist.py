@@ -20,12 +20,12 @@ def _random_64():
 
 
 
-# Zobrist Class =========================================================
+""" Zobrist Class =========================================================
     # Inputs  :        key_path -> path to new/existing zobrist_keys.pkl
     #                  self.keys -> list of generated keys
     # Methods :        
     #      1.   hash   ->   generate the input board hash (int) - and return
-# ========================================================================
+========================================================================"""
 class Zobrist:
 
 
