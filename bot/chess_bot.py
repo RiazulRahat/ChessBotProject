@@ -6,6 +6,8 @@ from bot.utils.zobrist import zobrist
 from bot.evaluation.positional_heuristics import positional_score
 from bot.utils.opening_book import load_opening_book
 
+from bot.evaluation.positional_heuristics import pawn_structure_penalty, piece_square_bonus, piece_safety_penalty, king_safety_bonus, piece_development_bonus, passed_pawn_bonus, bishop_pair_bonus, positional_score   ## helper
+
 TABLE_FILE = "bot/evaluation_table_current/eval_table_zobrist_pruned.pkl"    # shared pickle on disk
 DRAW_BIAS  = 0.2                     # +0.2 from White’s PoV → draw
 
@@ -61,7 +63,8 @@ class ChessBotAgent:
                  search_depth: int = 3,
                  positional_weight: float = 1.0,
                  use_policy: bool = True,
-                 use_quiescence: bool = False):     # added quiescence
+                 use_quiescence: bool = False,
+                 quiescence_depth: int = 5):     # added quiescence
         self.exploration_rate = exploration_rate
         self.learning_rate    = learning_rate
         self.mobility_weight = mobility_weight
@@ -71,6 +74,7 @@ class ChessBotAgent:
         self.positional_weight = positional_weight
         self.use_policy       = use_policy
         self.use_quiescence = use_quiescence
+        self.quiescence_depth = quiescence_depth
 
         self.games_since_save = 0
         self.evaluation_table = self._load_table()
@@ -99,6 +103,14 @@ class ChessBotAgent:
                                  "opening_book.pkl")
         self.opening_book = load_opening_book(book_path)
 
+
+    # Add this helper:
+    @staticmethod
+    def piece_value(piece: chess.Piece) -> float:
+        # small lookup by type in pawn‐units
+        vals = {chess.PAWN:1.0, chess.KNIGHT:3.0, chess.BISHOP:3.0,
+                chess.ROOK:5.0, chess.QUEEN:9.0}
+        return vals.get(piece.piece_type, 0.0)  
     # ───────── Evaluation ────────────────────────────────────────────────
     @staticmethod
     def _material_score(board: chess.Board) -> float:
@@ -163,7 +175,8 @@ class ChessBotAgent:
             return self.tt[key][1], self.tt[key][2]
 
         if depth == 0 and self.use_quiescence and not board.is_game_over():
-            return self.quiesce(board, alpha, beta), None
+            val = self.quiesce(board, alpha, beta, maximise_white)
+            return val, None
         if depth == 0 or board.is_game_over():
             return self._state_value(board), None
 
@@ -190,46 +203,63 @@ class ChessBotAgent:
     
     
     
-    def quiesce(self, board: chess.Board, alpha: float, beta: float, ply=0, max_ply=3) -> float:
+    def quiesce(self, board: chess.Board, alpha: float, beta: float, maximise_white: bool, ply=0, max_ply=None) -> float:
         """
         Simple capture‐and‐check quiescence search.
         """
-        stand = self._state_value(board)
-        if stand >= beta:
-            return beta
-        if alpha < stand:
-            alpha = stand
+        if max_ply is None:
+            max_ply = self.quiescence_depth
 
-        # gather & sort captures (MVV-LVA)
-        caps = [mv for mv in board.legal_moves if board.is_capture(mv)]
+        stand = self._state_value(board)
+        # 1) Stand check
+        if maximise_white:
+            if stand >= beta:
+                return beta
+            alpha = max(alpha, stand)
+        else:
+            if stand <= alpha:
+                return alpha
+            beta = min(beta, stand)
+
+        # 2) Only captures/checks
+        caps = [mv for mv in board.legal_moves
+            if board.is_capture(mv) or board.gives_check(mv)]
+        # (optional: sort by MVV-LVA here)
         caps.sort(key=lambda m: (
             -victim_value(board, m.to_square),
             attacker_value(board, m.from_square)
         ))
 
+        improved = False
         for mv in caps:
             if ply >= max_ply:
                 continue
 
-            # optional: delta-pruning
-            gain = piece_value(board.piece_at(mv.to_square))
-            if stand + gain < alpha:
-                continue
+            # delta-pruning (material gain only)
+            gain = self.piece_value(board.piece_at(mv.to_square))
+            if maximise_white:
+                if stand + gain < alpha:
+                    continue
+            else:
+                if stand - gain > beta:
+                    continue
 
-            # optional: static exchange eval
-            if not see(board, mv):
-                continue
-
+            improved = True
             board.push(mv)
-            score = -self.quiesce(board, -beta, -alpha, ply+1, max_ply)
+            # propagate the minimax signs
+            score = self.quiesce(board, alpha, beta, not maximise_white, ply+1, max_ply)
             board.pop()
 
-            if score >= beta:
-                return beta
-            if score > alpha:
-                alpha = score
+            if maximise_white:
+                if score >= beta:
+                    return beta
+                alpha = max(alpha, score)
+            else:
+                if score <= alpha:
+                    return alpha
+                beta = min(beta, score)
 
-        return alpha
+        return stand if not improved else (alpha if maximise_white else beta)
     
     def choose_move_timed(self, board: chess.Board, time_per_move: float):
         """
