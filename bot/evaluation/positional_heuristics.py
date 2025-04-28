@@ -1,17 +1,62 @@
+
+
 import chess
 
-# ───---- global tuning constants ─────────────────────────────────────────
+# ========== Global Tuning Constants ====================================
 MOBILITY_MAX            = 30    # how many moves this is relevant for
 MOBILITY_WEIGHT         = 0.05  # 0.05-0.1 - high mobility   0.05-0.02 - low mobility
 BISHOP_PAIR_BONUS       = 0.30  # 0.4-0.5 - favor bishop pair  0.15-0.2 - less power to bishops
 PASSED_PAWN_BONUS        = 0.20 # 0.3-0.4 - passed PAWNS   0.1-0.15 - careful pawn structure
 SAFETY_MULTIPLIER       = 1.0   # 1.2–1.5 - avoids hanging pieces   0.5–0.8 - can offer pieces
 KING_SHIELD_BONUS       = 0.25  # After castling pawn shield keeping rate
-# ────────────────────────────────────────────────────────────────────────
+# ========================================================================
 
-# Piece-Square Tables (in centipawns)
-# Tables represent values for White; for Black, values are negated automatically.
 
+
+# Definition:
+#       1. Centipawn :   a unit of measurement used to quantify a player's advantage 
+#                       in a chess position. It's equal to 1/100th of a pawn.
+#
+# Functions:
+#
+#      1. piece_square_bonus      : ( chess.Board ) -> FLOAT
+#         - calculate the total bonus for the current board for Piece-Square table
+#
+#      2. pawn_structure_penalty  : ( chess.Board ) -> FLOAT
+#         - penalizes doubled and isolated pawns
+#
+#      3. piece_safety_penalty    : ( chess.Board ) -> FLOAT
+#         - penalizes pieces that are attacked without adequate defense
+#
+#      4. king_safety_bonus       : ( chess.Board ) -> FLOAT
+#         - Rewards castled kings and penalizes unsafe kings
+#
+#      5. piece_development_bonus : ( chess.Board ) -> FLOAT
+#         - Rewards developing knights and bishops from the back rank
+#
+#      6. passed_pawn_bonus       : ( chess.Board ) -> FLOAT
+#         - no enemy pawn ahead on same file
+#
+#      7. bishop_pair_bonus       : ( chess.Board ) -> FLOAT
+#         - Tunable value
+#      ***
+#      8. positional_score        : ( chess.Board ) -> FLOAT
+#         - Adds all the Previous bonuses and penalties
+#
+
+
+
+
+
+
+# ===============================================================================
+#                   Piece-Square Tables (in centipawns)
+# ===============================================================================
+
+# Tables represent values for White; For Black, values are negated automatically.
+# -------------------------------------------------------------------------------
+
+# PAWN_TABLE : Encourages central advanced pawns and penalizes backward/overexposed pawns.
 PAWN_TABLE = [
      0,   0,   0,   0,   0,   0,   0,   0,
     50,  50,  50,  50,  50,  50,  50,  50,
@@ -23,6 +68,7 @@ PAWN_TABLE = [
      0,   0,   0,   0,   0,   0,   0,   0,
 ]
 
+# KNIGHT_TABLE  : Rewards knights in the center; punishes on the rim.
 KNIGHT_TABLE = [
    -50, -40, -30, -30, -30, -30, -40, -50,
    -40, -20,   0,   0,   0,   0, -20, -40,
@@ -34,6 +80,7 @@ KNIGHT_TABLE = [
    -50, -40, -30, -30, -30, -30, -40, -50,
 ]
 
+# Centralization -----------------------------
 BISHOP_TABLE = [
    -20, -10, -10, -10, -10, -10, -10, -20,
    -10,   0,   0,   0,   0,   0,   0, -10,
@@ -47,7 +94,7 @@ BISHOP_TABLE = [
 
 ROOK_TABLE = [
      0,   0,   5,  10,  10,   5,   0,   0,
-     0,   0,   5,  10,  10,   5,   0,   0,
+     0,   0,   5,  11,  11,   5,   0,   0,
      0,   0,   5,  10,  10,   5,   0,   0,
      0,   0,   5,  10,  10,   5,   0,   0,
      0,   0,   5,  10,  10,   5,   0,   0,
@@ -66,6 +113,12 @@ QUEEN_TABLE = [
    -10,   0,   5,   0,   0,   0,   0, -10,
    -20, -10, -10,  -5,  -5, -10, -10, -20,
 ]
+# ----------------------------------------------
+
+# KING_MID_TABLE vs KING_END_TABLE:
+#    1. Midgame table penalizes early central deployment
+#    2. Endgame table rewards central king activity 
+# #     when few pieces remaining
 
 KING_MID_TABLE = [
    -30, -40, -40, -50, -50, -40, -40, -30,
@@ -77,7 +130,6 @@ KING_MID_TABLE = [
     20,  20,   0,   0,   0,   0,  20,  20,
     20,  30,  10,   0,   0,  10,  30,  20,
 ]
-
 KING_END_TABLE = [
    -50, -40, -30, -20, -20, -30, -40, -50,
    -30, -20, -10,   0,   0, -10, -20, -30,
@@ -90,6 +142,21 @@ KING_END_TABLE = [
 ]
 
 
+
+
+
+
+
+
+
+
+# ===========================================================
+#                      Functions
+# ===========================================================
+
+#                         1
+
+# ======================================================
 def piece_square_bonus(board: chess.Board) -> float:
     """
     Compute total piece-square table bonus from White's perspective.
@@ -97,18 +164,20 @@ def piece_square_bonus(board: chess.Board) -> float:
     """
     score = 0.0
     for sq in chess.SQUARES:
+        # Find the piece - p
         p = board.piece_at(sq)
         if not p:
             continue
         table = None
         pt    = p.piece_type
+        # Map the table to piece type
         if   pt == chess.PAWN:   table = PAWN_TABLE
         elif pt == chess.KNIGHT: table = KNIGHT_TABLE
         elif pt == chess.BISHOP: table = BISHOP_TABLE
         elif pt == chess.ROOK:   table = ROOK_TABLE
         elif pt == chess.QUEEN:  table = QUEEN_TABLE
         elif pt == chess.KING:
-            # choose midgame vs endgame based on material
+            # KING --> choose Midgame vs Endgame : based on material 
             total_material = sum(
                 len(board.pieces(t, chess.WHITE)) + len(board.pieces(t, chess.BLACK))
                 for t in (chess.QUEEN, chess.ROOK, chess.BISHOP, chess.KNIGHT)
@@ -121,8 +190,13 @@ def piece_square_bonus(board: chess.Board) -> float:
             val = table[idx] / 100.0
             score += val if p.color == chess.WHITE else -val
     return score
+# =======================================================
 
 
+#                         2
+
+
+# =======================================================
 def pawn_structure_penalty(board: chess.Board) -> float:
     """
     Simple pawn structure penalties for doubled and isolated pawns.
@@ -143,7 +217,13 @@ def pawn_structure_penalty(board: chess.Board) -> float:
             if all(a not in files for a in (f-1, f+1) if 0 <= a < 8):
                 penalty += 0.1 * (1 if color == chess.WHITE else -1)
     return penalty
+# =======================================================
 
+
+#                         3
+
+
+# =======================================================
 def piece_safety_penalty(board: chess.Board) -> float:
     penalty = 0.0
     for sq in chess.SQUARES:
@@ -158,7 +238,13 @@ def piece_safety_penalty(board: chess.Board) -> float:
             penalty += ((len(attackers)-len(defenders)) * 0.1 * p.piece_type
                        ) * (1 if p.color==chess.WHITE else -1)
     return penalty
+# =======================================================
 
+
+#                         4
+
+
+# =======================================================
 def king_safety_bonus(board: chess.Board) -> float:
     """
     Positive bonus when a side has castled, 
@@ -182,7 +268,13 @@ def king_safety_bonus(board: chess.Board) -> float:
             if board.fullmove_number > 10 and king_sq in [chess.D4, chess.D5, chess.E4, chess.E5]:
                 bonus -= 0.2 if color == chess.WHITE else -0.2
     return bonus
+# =======================================================
 
+
+#                         5
+
+
+# =======================================================
 def piece_development_bonus(board: chess.Board) -> float:
     """
     Rewards minor pieces (knights/bishops) that have left their 
@@ -198,9 +290,13 @@ def piece_development_bonus(board: chess.Board) -> float:
                 if sq not in starting:
                     dev += 0.1 if color == chess.WHITE else -0.1
     return dev
+# =======================================================
 
 
+#                         6
 
+
+# =======================================================
 def passed_pawn_bonus(board: chess.Board) -> float:
     bonus = 0.0
     for color in (chess.WHITE, chess.BLACK):
@@ -214,7 +310,13 @@ def passed_pawn_bonus(board: chess.Board) -> float:
                    for f in ahead):
                 bonus += PASSED_PAWN_BONUS * (1 if color==chess.WHITE else -1)
     return bonus
+# =======================================================
 
+
+#                         7
+
+
+# =======================================================
 def bishop_pair_bonus(board: chess.Board) -> float:
     bonus = 0.0
     for color in (chess.WHITE, chess.BLACK):
@@ -222,7 +324,13 @@ def bishop_pair_bonus(board: chess.Board) -> float:
         if bishops >= 2:
             bonus += BISHOP_PAIR_BONUS * (1 if color==chess.WHITE else -1)
     return bonus
+# =======================================================
 
+
+#                         8
+
+
+# =======================================================
 def positional_score(board: chess.Board) -> float:
     """
     Combined positional score in pawn units (White positive).
@@ -232,7 +340,6 @@ def positional_score(board: chess.Board) -> float:
     safety  = piece_safety_penalty(board)
     dev     = piece_development_bonus(board)
     kingpb  = king_safety_bonus(board)
-    # new bonuses
     bp_bonus    = bishop_pair_bonus(board)
     pp_bonus    = passed_pawn_bonus(board)
 
@@ -262,3 +369,4 @@ def positional_score(board: chess.Board) -> float:
       + pp_bonus
       + shield
     )
+# =======================================================
