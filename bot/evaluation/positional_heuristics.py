@@ -331,6 +331,32 @@ def bishop_pair_bonus(board: chess.Board) -> float:
 #                         8
 
 
+
+
+
+# added new
+def intermediate_penalty(board: chess.Board) -> float:
+    """
+    Lightly penalize any piece that is attacked more times than it is defended.
+    Returns penalty in pawn‐units to subtract from positional_score.
+    """
+    penalty = 0.0
+    for square, piece in board.piece_map().items():
+        attackers = board.attackers(not piece.color, square)
+        defenders = board.attackers(piece.color, square)
+        net = len(attackers) - len(defenders)
+        if net > 0:
+            # 0.05 pawn penalty per net attacker
+            penalty += 0.05 * net
+    return penalty
+
+
+
+
+
+
+
+
 # =======================================================
 def positional_score(board: chess.Board) -> float:
     """
@@ -359,10 +385,18 @@ def positional_score(board: chess.Board) -> float:
         if board.king(color) == ksquare and board.piece_at(pawn_sq):
             shield += KING_SHIELD_BONUS * (1 if color == chess.WHITE else -1)
 
+    
+
+    # New “mistake” penalty
+    mistake_pen = intermediate_penalty(board)
+
+
+
     return (
         pst
       - pawnp
       - safety
+      - mistake_pen
       + mob
       + 0.8 * kingpb
       + 0.5 * dev
