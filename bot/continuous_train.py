@@ -11,9 +11,9 @@ TOTAL_GAMES   = 2_000
 INITIAL_EPS   = 0.05
 DECAY_EVERY   = 250
 DECAY_FACTOR  = 0.90
-LEARNING_RATE = 0.20
+LEARNING_RATE = 0.15
 MOB_WEIGHT    = 0.05
-POS_WEIGHT    = 0.50
+POS_WEIGHT    = 0.65
 SEARCH_DEPTH  = 3   
 USE_QUIESCENCE   = True 
 QUIESCENCE_DEPTH = 5    
@@ -95,7 +95,11 @@ def main():
                 size = len(bot_w.evaluation_table)
                 print(f"{now} | {g:,} games  stdev {sd:.4f}  ε {eps:.3f}")
                 print(f"    table entries: {size:,}")
-                print(f"    record  W–L–D: {white_wins:,}–{black_wins:,}–{draws:,}")
+                print(f"    record  W–L–D: {white_wins:,}–{black_wins:,}–{draws:,}, quiesce_calls={white_bot.quiesce_calls + black_bot.quiesce_calls}")
+                #                                                                      ^^^^
+                # DEBUG: then reset the counter so you get “per-100-games” rather than cumulative
+                bot_w.quiesce_calls = 0
+                bot_b.quiesce_calls = 0 
 
             # decay ε
             if g % DECAY_EVERY == 0:

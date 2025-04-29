@@ -40,9 +40,10 @@ def main():
 
     human_color = chess.WHITE
     bot   = ChessBotAgent(exploration_rate=0.0, learning_rate=0.0,
-                          save_interval=50, table_path="bot/evaluation_table_current/eval_table_zobrist_pruned.pkl", 
+                          save_interval=50, table_path="bot/evaluation_table_current/eval_table_zobrist_pruned.pkl",
+                          policy_path="bot/policy_table_v1.pkl", policy_mix=0.1,
                           search_depth=3, positional_weight=0.8, mobility_weight=0.05,
-                          use_quiescence=True, use_policy=True)
+                          use_quiescence=True, quiescence_depth=5, use_policy=True)
 
     running = True
     while running:

@@ -57,24 +57,36 @@ class ChessBotAgent:
 
     def __init__(self,
                  exploration_rate=0.1,
-                 learning_rate=0.05, mobility_weight=0.05,
+                 learning_rate=0.02, mobility_weight=0.05,
                  save_interval=50,
                  table_path: str = TABLE_FILE,
+                 policy_path: str = None,
+                 policy_mix: float = 0.1,
                  search_depth: int = 3,
                  positional_weight: float = 1.0,
                  use_policy: bool = True,
                  use_quiescence: bool = False,
-                 quiescence_depth: int = 5):     # added quiescence
+                 quiescence_depth: int = 5,
+                 zobrist_keys_path="bot/zobrist_keys.pkl"):     # added quiescence
         self.exploration_rate = exploration_rate
         self.learning_rate    = learning_rate
         self.mobility_weight = mobility_weight
         self.save_interval    = save_interval
         self._table_path      = table_path
+        self.policy_mix      = policy_mix
+        self.policy_table    = {}
+        if policy_path:
+            import pickle
+            with open(policy_path, 'rb') as f:
+                self.policy_table = pickle.load(f)
+            print(f"Loaded policy table ({len(self.policy_table)} entries)")
         self.search_depth     = max(1, search_depth)
         self.positional_weight = positional_weight
         self.use_policy       = use_policy
         self.use_quiescence = use_quiescence
         self.quiescence_depth = quiescence_depth
+        self.quiesce_calls = 0  # debug line
+        
 
         self.games_since_save = 0
         self.evaluation_table = self._load_table()
@@ -98,6 +110,11 @@ class ChessBotAgent:
         except FileNotFoundError:
             pass
 
+        with open(zobrist_keys_path, "rb") as f:
+            # this should give you a dict with piece/square keys,
+            # castling keys, en-passant keys, and side-to-move key
+            self.zobrist_keys = pickle.load(f)
+
         # Loading the book to the bot
         book_path = os.path.join(os.path.dirname(__file__),
                                  "opening_book.pkl")
@@ -106,11 +123,14 @@ class ChessBotAgent:
 
     # Add this helper:
     @staticmethod
-    def piece_value(piece: chess.Piece) -> float:
+    def piece_value(piece: chess.Piece | None) -> float:
+        if piece is None:
+            return 0.0
         # small lookup by type in pawn‐units
         vals = {chess.PAWN:1.0, chess.KNIGHT:3.0, chess.BISHOP:3.0,
                 chess.ROOK:5.0, chess.QUEEN:9.0}
         return vals.get(piece.piece_type, 0.0)  
+    
     # ───────── Evaluation ────────────────────────────────────────────────
     @staticmethod
     def _material_score(board: chess.Board) -> float:
@@ -145,9 +165,13 @@ class ChessBotAgent:
             return chess.Move.from_uci(uci_move)
         
 
-        # 1) instant lookup if we have it
-        if self.use_policy and fen in self.policy:
-                return chess.Move.from_uci(self.policy[fen])
+        # 1) policy sampling (with probability policy_mix)
+        if self.use_policy and fen in self.policy and random.random() < self.policy_mix:
+            dist = self.policy[fen]               # {uci_str: prob, ...}
+            ucis = list(dist.keys())
+            weights = list(dist.values())
+            uci_move = random.choices(ucis, weights)[0]
+            return chess.Move.from_uci(uci_move)
         
         """ε-greedy search to self.search_depth plies."""
         legal = list(board.legal_moves)
@@ -170,11 +194,13 @@ class ChessBotAgent:
 
     # ───────── Alpha-beta with move ordering ─────────────────────────────
     def _alphabeta(self, board, depth, alpha, beta, maximise_white):
+
         key = zobrist.hash(board)
         if key in self.tt and self.tt[key][0] >= depth:
             return self.tt[key][1], self.tt[key][2]
 
         if depth == 0 and self.use_quiescence and not board.is_game_over():
+            self.quiesce_calls += 1 # debug code
             val = self.quiesce(board, alpha, beta, maximise_white)
             return val, None
         if depth == 0 or board.is_game_over():
@@ -221,9 +247,9 @@ class ChessBotAgent:
                 return alpha
             beta = min(beta, stand)
 
-        # 2) Only captures/checks
+        # 2) Only captures
         caps = [mv for mv in board.legal_moves
-            if board.is_capture(mv) or board.gives_check(mv)]
+                if board.is_capture(mv)]
         # (optional: sort by MVV-LVA here)
         caps.sort(key=lambda m: (
             -victim_value(board, m.to_square),
@@ -420,3 +446,78 @@ class ChessBotAgent:
             f"Pruned to {len(self.evaluation_table)} entries "
             f"(target ≤ {max_entries}, min_visits={min_visits})."
         )
+
+
+    def build_policy_table(self):
+        """
+        Build a policy table from zkey_to_fen and zkey_stats.
+        For each known Z-key (i.e. each FEN), we look at every legal move,
+        compute the child Z-key, fetch its visit count, and normalize.
+        """
+        policy = {}
+
+        for zkey, fen in self.zkey_to_fen.items():
+            board = chess.Board(fen)
+            move_counts = {}
+
+            # 1) Gather visit counts for each legal continuation
+            for move in board.legal_moves:
+                board.push(move)
+                child_zkey = self.board_to_zkey(board)
+                board.pop()
+
+                visits = self.zkey_stats.get(child_zkey, {}).get("visits", 0)
+                move_counts[move.uci()] = visits
+
+            # 2) Normalize into probabilities
+            total_visits = sum(move_counts.values())
+            if total_visits > 0:
+                policy[zkey] = {
+                    uci: visits / total_visits
+                    for uci, visits in move_counts.items()
+                }
+            else:
+                # fallback: uniform random if no data
+                n = len(move_counts)
+                if n:
+                    policy[zkey] = {uci: 1.0/n for uci in move_counts}
+                else:
+                    policy[zkey] = {}  # no legal moves (shouldn’t happen)
+
+        # Save it on the agent for later usage
+        self.policy_table = policy
+        return policy
+
+
+    def save_policy(self, path: str):
+        """Pickle out the policy table to disk."""
+        if not hasattr(self, "policy_table"):
+            raise RuntimeError("Policy table not built yet. Call build_policy_table() first.")
+        with open(path, "wb") as f:
+            pickle.dump(self.policy_table, f)
+        print(f"Policy table with {len(self.policy_table)} entries saved to {path}")
+
+
+    def board_to_zkey(self, board: chess.Board) -> int:
+        z = 0
+        # 1) piece placements
+        for sq, piece in board.piece_map().items():
+            # your zobrist_keys likely uses a tuple key like
+            # (piece_type, color, square)
+            z ^= self.zobrist_keys[(piece.piece_type, piece.color, sq)]
+
+        # 2) castling rights
+        # if you stored them under e.g. ("castle", right)
+        for right in [chess.BB_H1, chess.BB_A1, chess.BB_H8, chess.BB_A8]:
+            if board.has_castling_rights(right):
+                z ^= self.zobrist_keys[("castle", right)]
+
+        # 3) en-passant file
+        if board.ep_square is not None:
+            z ^= self.zobrist_keys[("ep", board.ep_square)]
+
+        # 4) side to move
+        if board.turn == chess.BLACK:
+            z ^= self.zobrist_keys["turn"]
+
+        return z

@@ -21,11 +21,14 @@ FEN_MAP_OUT = os.path.join(os.path.dirname(__file__), "fen_map_live.pkl")
 agent = None
 try:
     agent = ChessBotAgent(
-         exploration_rate=0.05,
+         exploration_rate=0.01,
          search_depth=3,
          use_policy=True,
          save_interval=1,
-         use_quiescence=True
+         use_quiescence=True,
+         quiescence_depth=5,
+         save_interval=1,
+         policy_path="bot/policy_table_v1.pkl"
      )
 except Exception:
     traceback.print_exc()
