@@ -40,8 +40,12 @@ KING_SHIELD_BONUS       = 0.25  # After castling pawn shield keeping rate
 #
 #      7. bishop_pair_bonus       : ( chess.Board ) -> FLOAT
 #         - Tunable value
+#
+#      8. intermediate_penalty    : ( chess.Board ) -> FLOAT
+#         - penalty for hanging and losing pieces
+#
 #      ***
-#      8. positional_score        : ( chess.Board ) -> FLOAT
+#      9. positional_score        : ( chess.Board ) -> FLOAT
 #         - Adds all the Previous bonuses and penalties
 """
 
@@ -192,11 +196,11 @@ def piece_square_bonus(board: chess.Board) -> float:
             score += val if p.color == chess.WHITE else -val
     return score
 # =======================================================
-
-
+#
+#
 #                         2
-
-
+#
+#
 # =======================================================
 def pawn_structure_penalty(board: chess.Board) -> float:
     """
@@ -331,30 +335,25 @@ def bishop_pair_bonus(board: chess.Board) -> float:
 #                         8
 
 
-
-
-
-# added new
+# =======================================================
 def intermediate_penalty(board: chess.Board) -> float:
     """
-    Lightly penalize any piece that is attacked more times than it is defended.
-    Returns penalty in pawn‐units to subtract from positional_score.
+    Penalise pieces attacked more than defended.  Positive for White advantage,
+    negative for Black.
     """
     penalty = 0.0
-    for square, piece in board.piece_map().items():
-        attackers = board.attackers(not piece.color, square)
-        defenders = board.attackers(piece.color, square)
+    for sq, pc in board.piece_map().items():
+        attackers = board.attackers(not pc.color, sq)
+        defenders = board.attackers(pc.color, sq)
         net = len(attackers) - len(defenders)
         if net > 0:
-            # 0.05 pawn penalty per net attacker
-            penalty += 0.05 * net
+            sign = 1.0 if pc.color == chess.WHITE else -1.0
+            penalty += 0.05 * net * sign
     return penalty
+# =======================================================
 
 
-
-
-
-
+#                         9
 
 
 # =======================================================
@@ -370,11 +369,22 @@ def positional_score(board: chess.Board) -> float:
     bp_bonus    = bishop_pair_bonus(board)
     pp_bonus    = passed_pawn_bonus(board)
 
-    # normalized mobility
-    # clamp and avoid list allocation
-    moves = board.legal_moves.count()
-    moves = min(moves, MOBILITY_MAX)
-    mob   = (moves / MOBILITY_MAX) * MOBILITY_WEIGHT
+    # Count legal moves for **both** colours so the bonus is symmetrical.
+    cur_turn = board.turn
+    moves_side_to_move = board.legal_moves.count()
+
+    board.push(chess.Move.null())            # give the move to the opponent
+    moves_other_side    = board.legal_moves.count()
+    board.pop()
+
+    if cur_turn == chess.WHITE:
+        moves_white, moves_black = moves_side_to_move, moves_other_side
+    else:
+        moves_white, moves_black = moves_other_side, moves_side_to_move
+
+    rel_mob = max(-MOBILITY_MAX, min(MOBILITY_MAX,
+                 moves_white - moves_black))           # clamp
+    mob = (rel_mob / MOBILITY_MAX) * MOBILITY_WEIGHT
 
     # pawn shield: award +0.25 for White, –0.25 for Black if king is castled and front pawn intact
     shield = 0.0
