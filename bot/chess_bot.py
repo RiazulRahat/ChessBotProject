@@ -1,139 +1,101 @@
 # bot/chess_bot.py
-import time
-import datetime
-import chess, random, pickle, os
+from bot.utils.debug import dprint
+import os, time, datetime, random, pickle
+import chess
+
 from bot.utils.zobrist import zobrist
-from bot.evaluation.positional_heuristics import positional_score
 from bot.utils.opening_book import load_opening_book
+from bot.evaluation.positional_heuristics import positional_score
 
-from bot.evaluation.positional_heuristics import pawn_structure_penalty, piece_square_bonus, piece_safety_penalty, king_safety_bonus, piece_development_bonus, passed_pawn_bonus, bishop_pair_bonus, positional_score   ## helper
+# ────────────────────────────────────────────────────────────────────────
+TABLE_FILE = "bot/evaluation_table_current/eval_table_zobrist_pruned.pkl"
+DRAW_BIAS  = 0.0
+INF        = float("inf")
 
-TABLE_FILE = "bot/evaluation_table_current/eval_table_zobrist_pruned.pkl"    # shared pickle on disk
-DRAW_BIAS  = 0.2                     # +0.2 from White’s PoV → draw
-
-INF = float("inf")
-
-# ─── Tactical helper functions for quiescence ───────────────────────────
-PIECE_VALUES = {
-    chess.PAWN:   100,
-    chess.KNIGHT: 320,
-    chess.BISHOP: 330,
-    chess.ROOK:   500,
-    chess.QUEEN:  900,
-    chess.KING:   20000
-}
+# unified piece values (centipawns)
+_PV = {chess.PAWN: 100, chess.KNIGHT: 320, chess.BISHOP: 330,
+       chess.ROOK: 500, chess.QUEEN: 900, chess.KING: 20_000}
 
 def piece_value(piece: chess.Piece | None) -> int:
-    return PIECE_VALUES.get(piece.piece_type, 0) if piece else 0
+    return _PV.get(piece.piece_type, 0) if piece else 0
 
-def victim_value(board: chess.Board, sq: chess.Square) -> int:
-    p = board.piece_at(sq)
-    return piece_value(p)
+def victim_value(board: chess.Board, sq) -> int:
+    return piece_value(board.piece_at(sq))
 
-def attacker_value(board: chess.Board, sq: chess.Square) -> int:
-    # MVV-LVA: least-valuable attacker first
-    attackers = [board.piece_at(sq2).piece_type
-                 for sq2 in board.attackers(board.turn, sq)]
-    if not attackers:
-        return 0
-    return min(PIECE_VALUES[t] for t in attackers)
+def attacker_value(board: chess.Board, sq) -> int:
+    atk = [board.piece_at(s).piece_type for s in board.attackers(board.turn, sq)]
+    return min(_PV[t] for t in atk) if atk else 0
+# ------------------------------------------------------------------------
 
-def see(board: chess.Board, move: chess.Move) -> bool:
-    try:
-        return board.see(move) >= 0
-    except AttributeError:
-        # fallback if python-chess <1.7
-        victim = piece_value(board.piece_at(move.to_square))
-        attacker = piece_value(board.piece_at(move.from_square))
-        return victim >= attacker
-# ────────────────────────────────────────────────────────────────────────
 
 class ChessBotAgent:
     """
-    Tiny TD-learning chess agent with
-    • TD(0) value updates
-    • ε-greedy NN-ply alpha-beta search (default depth = 3)
+    TD(0) learner with ε‑greedy Alpha‑Beta and capture‑only quiescence.
     """
 
     def __init__(self,
                  exploration_rate=0.1,
-                 learning_rate=0.02, mobility_weight=0.05,
+                 learning_rate=0.02,
+                 mobility_weight=0.05,
                  save_interval=50,
-                 table_path: str = TABLE_FILE,
-                 policy_path: str = None,
-                 policy_mix: float = 0.1,
-                 search_depth: int = 3,
-                 positional_weight: float = 1.0,
-                 use_policy: bool = True,
-                 use_quiescence: bool = False,
-                 quiescence_depth: int = 5,
-                 zobrist_keys_path="bot/zobrist_keys.pkl"):     # added quiescence
-        self.exploration_rate = exploration_rate
-        self.learning_rate    = learning_rate
-        self.mobility_weight = mobility_weight
-        self.save_interval    = save_interval
-        self._table_path      = table_path
-        self.policy_mix      = policy_mix
-        self.policy_table    = {}
-        if policy_path:
-            import pickle
-            with open(policy_path, 'rb') as f:
-                self.policy_table = pickle.load(f)
-            print(f"Loaded policy table ({len(self.policy_table)} entries)")
-        self.search_depth     = max(1, search_depth)
-        self.positional_weight = positional_weight
-        self.use_policy       = use_policy
-        self.use_quiescence = use_quiescence
-        self.quiescence_depth = quiescence_depth
-        self.quiesce_calls = 0  # debug line
-        
+                 table_path=TABLE_FILE,
+                 policy_path=None,
+                 policy_mix=0.1,
+                 search_depth=3,
+                 positional_weight=1.0,
+                 use_policy=True,
+                 use_quiescence=False,
+                 quiescence_depth=5,
+                 zobrist_keys_path="bot/zobrist_keys.pkl"):
 
-        self.games_since_save = 0
+        # ── knobs
+        self.exploration_rate  = exploration_rate
+        self.learning_rate     = learning_rate
+        self.mobility_weight   = mobility_weight
+        self.save_interval     = save_interval
+        self.search_depth      = max(1, search_depth)
+        self.positional_weight = positional_weight
+        self.use_policy        = use_policy
+        self.policy_mix        = policy_mix
+        self.use_quiescence    = use_quiescence
+        self.quiescence_depth  = quiescence_depth
+
+        # ── persistent tables
+        self._table_path   = table_path
         self.evaluation_table = self._load_table()
-        fen_path = self._table_path.replace(".pkl", "_zkey2fen.pkl")
-        if os.path.exists(fen_path):
-            with open(fen_path, "rb") as f:
+        self.zkey_to_fen      = {}
+        self.zkey_stats       = {}
+        self.tt               = {}          # key → (depth, value, bestMove)
+
+        if os.path.exists(table_path.replace(".pkl", "_zkey2fen.pkl")):
+            with open(table_path.replace(".pkl", "_zkey2fen.pkl"), "rb") as f:
                 self.zkey_to_fen = pickle.load(f)
-        else:
-            self.zkey_to_fen = {}
-        self.zkey_stats    = {}
-        self.tt = {}  
-        stats_path = self._table_path.replace(".pkl", "_stats.pkl")
-        if os.path.exists(stats_path):
-            with open(stats_path, "rb") as f:
+        if os.path.exists(table_path.replace(".pkl", "_stats.pkl")):
+            with open(table_path.replace(".pkl", "_stats.pkl"), "rb") as f:
                 self.zkey_stats = pickle.load(f)
-        self.policy = {}
-        policy_path = os.path.join(os.path.dirname(__file__), "policy_book.pkl")
-        try:
+
+        self.policy: dict[int, dict[str, float]] = {}
+        if policy_path:
             with open(policy_path, "rb") as f:
                 self.policy = pickle.load(f)
-        except FileNotFoundError:
-            pass
+            print(f"Loaded policy table ({len(self.policy):,})")
 
-        with open(zobrist_keys_path, "rb") as f:
-            # this should give you a dict with piece/square keys,
-            # castling keys, en-passant keys, and side-to-move key
-            self.zobrist_keys = pickle.load(f)
-
-        # Loading the book to the bot
-        book_path = os.path.join(os.path.dirname(__file__),
-                                 "opening_book.pkl")
+        # opening book
+        book_path = os.path.join(os.path.dirname(__file__), "opening_book.pkl")
         self.opening_book = load_opening_book(book_path)
 
+        # keep key array around for external tools
+        with open(zobrist_keys_path, "rb") as f:
+            self.zobrist_keys = pickle.load(f)
 
-    # Add this helper:
+        self.games_since_save = 0
+        self.quiesce_calls    = 0
+        dprint("Bot created  LR=%.3f  ε=%.3f  depth=%d",
+               self.learning_rate, self.exploration_rate, self.search_depth)
+
+    # ───────── evaluation helpers ───────────────────────────────────────
     @staticmethod
-    def piece_value(piece: chess.Piece | None) -> float:
-        if piece is None:
-            return 0.0
-        # small lookup by type in pawn‐units
-        vals = {chess.PAWN:1.0, chess.KNIGHT:3.0, chess.BISHOP:3.0,
-                chess.ROOK:5.0, chess.QUEEN:9.0}
-        return vals.get(piece.piece_type, 0.0)  
-    
-    # ───────── Evaluation ────────────────────────────────────────────────
-    @staticmethod
-    def _material_score(board: chess.Board) -> float:
+    def _material(board: chess.Board) -> float:
         vals = {chess.PAWN: 1, chess.KNIGHT: 3, chess.BISHOP: 3,
                 chess.ROOK: 5, chess.QUEEN: 9}
         return sum(v * (len(board.pieces(p, chess.WHITE)) -
@@ -141,103 +103,131 @@ class ChessBotAgent:
                    for p, v in vals.items())
 
     def _state_value(self, board: chess.Board) -> float:
-        # 1) lookup by Zobrist hash; fallback to material
-        key  = zobrist.hash(board)
-        # ensure every key gets a FEN mapping, even if we never update it
+        key = zobrist.hash(board)
         if key in self.evaluation_table:
             self.zkey_to_fen.setdefault(key, board.fen())
-        
-        base = self.evaluation_table.get(key, self._material_score(board))
-        # 2) positional + mobility bonus
-        pos = positional_score(board)
-        return base + self.positional_weight * pos
+        base = self.evaluation_table.get(key, self._material(board))
+        return base + self.positional_weight * positional_score(board)
 
-    # ───────── Public move selection ─────────────────────────────────────
+    # ───────── public move pickers ──────────────────────────────────────
     def choose_move(self, board: chess.Board):
-
         fen = board.fen()
 
-        # 0) Opening book lookup
+        # 0) opening book
         if fen in self.opening_book:
-            # pick randomly among book moves to add variety
-            uci_move = random.choice(self.opening_book[fen])
-            # print(f"[Book] {'White' if board.turn else 'Black'} plays {uci_move} from book")    # Debug line
-            return chess.Move.from_uci(uci_move)
-        
+            move = chess.Move.from_uci(random.choice(self.opening_book[fen]))
+            dprint("[BOOK] %s", move.uci())
+            return move
 
-        # 1) policy sampling (with probability policy_mix)
+        # 1) learned policy
         if self.use_policy and fen in self.policy and random.random() < self.policy_mix:
-            dist = self.policy[fen]               # {uci_str: prob, ...}
-            ucis = list(dist.keys())
-            weights = list(dist.values())
-            uci_move = random.choices(ucis, weights)[0]
-            return chess.Move.from_uci(uci_move)
-        
-        """ε-greedy search to self.search_depth plies."""
+            moves, probs = zip(*self.policy[fen].items())
+            mv = chess.Move.from_uci(random.choices(moves, probs)[0])
+            dprint("[POLICY] %s", mv.uci())
+            return mv
+
         legal = list(board.legal_moves)
         if not legal:
             return None
 
-        # exploration
+        # 2) exploration
         if random.random() < self.exploration_rate:
-            return random.choice(legal)
+            mv = random.choice(legal)
+            dprint("[EXPLORE] %s", mv.uci())
+            return mv
 
-        # alpha-beta search
+        # 3) search
         maximise_white = board.turn == chess.WHITE
-        _, best = self._alphabeta(board,
-                                  depth=self.search_depth,
-                                  alpha=-INF,
-                                  beta=+INF,
-                                  maximise_white=maximise_white)
-        return best or random.choice(legal)
+        val, mv = self._alphabeta(board, self.search_depth,
+                                  -INF, +INF, maximise_white)
+        dprint("[SEARCH] depth=%d  move=%s  val=%.1f",
+               self.search_depth, mv.uci() if mv else "?", val)
+        return mv or random.choice(legal)
 
+    def choose_move_timed(self, board: chess.Board, time_per_move: float):
+        start = time.time()
+        best = random.choice(list(board.legal_moves))
+        for depth in range(1, self.search_depth + 1):
+            val, mv = self._alphabeta(board, depth, -INF, INF,
+                                      board.turn == chess.WHITE)
+            if mv:
+                best = mv
+            if time.time() - start >= time_per_move:
+                break
+        return best
 
-    # ───────── Alpha-beta with move ordering ─────────────────────────────
+    # ───────── alpha‑beta with TT ───────────────────────────────────────
     def _alphabeta(self, board, depth, alpha, beta, maximise_white):
-
         key = zobrist.hash(board)
+
+        # ----- terminal position guard -------------
+        if board.is_game_over():
+            return self._state_value(board), None
+        # -------------------------------------------
+
+        dprint("αβ d=%d α=%.1f β=%.1f maxW=%s hash=%016x",
+               depth, alpha, beta, maximise_white, key)
+
         if key in self.tt and self.tt[key][0] >= depth:
+            dprint("TT‑hit depth=%d  val=%.1f", self.tt[key][0], self.tt[key][1])
             return self.tt[key][1], self.tt[key][2]
 
-        if depth == 0 and self.use_quiescence and not board.is_game_over():
-            self.quiesce_calls += 1 # debug code
-            val = self.quiesce(board, alpha, beta, maximise_white)
-            return val, None
-        if depth == 0 or board.is_game_over():
+        if depth == 0:
+            # quiescence hit?
+            if key in self.tt and self.tt[key][0] == -1:
+                return self.tt[key][1], None
+            if self.use_quiescence and not board.is_game_over():
+                self.quiesce_calls += 1
+                val = self.quiesce(board, alpha, beta,
+                                   board.turn == chess.WHITE, 0)
+                return val, None
             return self._state_value(board), None
 
         best_move = None
         for mv in self._ordered_moves(board):
             board.push(mv)
-            val, _ = self._alphabeta(board, depth-1, alpha, beta, maximise_white)
+            val, _ = self._alphabeta(board, depth - 1,
+                                     alpha, beta, not maximise_white)
             board.pop()
 
-            if maximise_white == board.turn:        # same colour => maximiser
+            if maximise_white:
                 if val > alpha:
                     alpha, best_move = val, mv
                 if alpha >= beta:
-                    break                           # β cut-off
-            else:                                   # minimiser
+                    break
+            else:
                 if val < beta:
                     beta, best_move = val, mv
                 if beta <= alpha:
-                    break                           # α cut-off
+                    break
 
-        val = alpha if maximise_white == board.turn else beta
-        self.tt[key] = (depth, val, best_move)
-        return val, best_move
-    
-    
-    
-    def quiesce(self, board: chess.Board, alpha: float, beta: float, maximise_white: bool, ply=0, max_ply=None) -> float:
-        """
-        Simple capture‐and‐check quiescence search.
-        """
-        if max_ply is None:
-            max_ply = self.quiescence_depth
+        # If no move survived (legal list might be empty in stalemate),
+        # fall back gracefully instead of crashing.
+        if best_move is None:
+            moves = list(board.legal_moves)
+            if moves:
+                best_move = random.choice(moves)
+            else:            # really no legal moves → treat as terminal
+                best_val = self._state_value(board)
+                self.tt[key] = (depth, best_val, None)
+                return best_val, None
+
+        best_val = alpha if maximise_white else beta
+        self.tt[key] = (depth, best_val, best_move)
+        dprint("αβ‑ret d=%d  best=%s  val=%.1f",
+                depth, best_move.uci() if best_move else "?", best_val)
+        return best_val, best_move
+
+    # ───────── quiescence search ────────────────────────────────────────
+    def quiesce(self, board, alpha, beta, maximise_white, ply):
+        key = zobrist.hash(board)
+        if key in self.tt and self.tt[key][0] == -1:
+            dprint("QUI‑TT hit  val=%.1f", self.tt[key][1])
+            return self.tt[key][1]
 
         stand = self._state_value(board)
-        # 1) Stand check
+        dprint("QUI ply=%d stand=%.1f α=%.1f β=%.1f", ply, stand, alpha, beta, lvl=2)
+
         if maximise_white:
             if stand >= beta:
                 return beta
@@ -247,64 +237,43 @@ class ChessBotAgent:
                 return alpha
             beta = min(beta, stand)
 
-        # 2) Only captures
-        caps = [mv for mv in board.legal_moves
-                if board.is_capture(mv)]
-        # (optional: sort by MVV-LVA here)
-        caps.sort(key=lambda m: (
-            -victim_value(board, m.to_square),
-            attacker_value(board, m.from_square)
-        ))
+        if ply >= self.quiescence_depth:
+            self.tt[key] = (-1, stand, None)
+            dprint("QUI‑store leaf  val=%.1f", stand)
+            return stand
 
-        improved = False
-        for mv in caps:
-            if ply >= max_ply:
+        moves = [m for m in board.legal_moves if board.is_capture(m)]
+        moves.sort(key=lambda m: (-victim_value(board, m.to_square),
+                                  attacker_value(board, m.from_square)))
+
+        for mv in moves:
+            gain = piece_value(board.piece_at(mv.to_square))
+            if maximise_white and stand + gain < alpha:
+                continue
+            if not maximise_white and stand - gain > beta:
                 continue
 
-            # delta-pruning (material gain only)
-            gain = self.piece_value(board.piece_at(mv.to_square))
-            if maximise_white:
-                if stand + gain < alpha:
-                    continue
-            else:
-                if stand - gain > beta:
-                    continue
-
-            improved = True
             board.push(mv)
-            # propagate the minimax signs
-            score = self.quiesce(board, alpha, beta, not maximise_white, ply+1, max_ply)
+            score = self.quiesce(board, alpha, beta,
+                                 not maximise_white, ply + 1)
             board.pop()
 
             if maximise_white:
                 if score >= beta:
+                    self.tt[key] = (-1, beta, None)
                     return beta
                 alpha = max(alpha, score)
             else:
                 if score <= alpha:
+                    self.tt[key] = (-1, alpha, None)
                     return alpha
                 beta = min(beta, score)
 
-        return stand if not improved else (alpha if maximise_white else beta)
-    
-    def choose_move_timed(self, board: chess.Board, time_per_move: float):
-        """
-        Iterative‐deepening wrapper over _alphabeta that runs up to time_per_move seconds.
-        """
-        best_move = None
-        start     = time.time()
-        # You can iterate to some max depth (e.g. self.search_depth or a new max)
-        max_d = self.search_depth
-        for depth in range(1, max_d+1):
-            val, mv = self._alphabeta(board, depth, -INF, +INF, board.turn)
-            if mv:
-                best_move = mv
-            # stop if we’ve run out of time
-            if time.time() - start > time_per_move:
-                break
-        return best_move or random.choice(list(board.legal_moves))
+        result = alpha if maximise_white else beta
+        self.tt[key] = (-1, result, None)
+        return result
 
-    # simple MVV-LVA + checks first
+    # ───────── move ordering ────────────────────────────────────────────
     def _ordered_moves(self, board):
         caps, checks, quiet = [], [], []
         for mv in board.legal_moves:
@@ -315,47 +284,35 @@ class ChessBotAgent:
             else:
                 quiet.append(mv)
 
-        # Most-Valuable-Victim / Least-Valuable-Attacker
         def mvv_lva(m):
-            """
-            Most-Valuable-Victim / Least-Valuable-Attacker score.
-            Works for normal captures *and* en-passant.
-            """
-            if board.is_en_passant(m):
-                victim_type = chess.PAWN                      # the captured pawn
-            else:
-                v = board.piece_at(m.to_square)
-                victim_type = v.piece_type if v else 0        # paranoid fallback
-
-            attacker_type = board.piece_at(m.from_square).piece_type
-            return (-victim_type, attacker_type)
+            victim = chess.PAWN if board.is_en_passant(m) else \
+                     (board.piece_at(m.to_square).piece_type
+                      if board.piece_at(m.to_square) else 0)
+            attacker = board.piece_at(m.from_square).piece_type
+            return (-victim, attacker)
 
         caps.sort(key=mvv_lva)
-        
-        # Randomizing the top move
-        random.shuffle(quiet)
-
+        # deterministic ordering keeps search results stable
+        quiet.sort(key=lambda m: m.uci())
         return caps + checks + quiet
 
-    # ───────── TD-0 learning ─────────────────────────────────────────────
-    def update_evaluation(self, game_history, result):
-        if   result == "1-0":  next_v = 1.0
-        elif result == "0-1":  next_v = -1.0
-        else:                  next_v = DRAW_BIAS
-
-        for zkey, white_to_move, fen in reversed(game_history):
-            target = next_v if white_to_move else -next_v
-            old    = self.evaluation_table.get(zkey, 0.0)
-            new    = old + self.learning_rate * (target - old)
+    # ───────── TD‑0 update & persistence ────────────────────────────────
+    def update_evaluation(self, history, result):
+        next_v = 1.0 if result == "1-0" else -1.0 if result == "0-1" else DRAW_BIAS
+        for zkey, white_move, fen in reversed(history):
+            target = next_v if white_move else -next_v
+            old = self.evaluation_table.get(zkey, 0.0)
+            new = old + self.learning_rate * (target - old)
             self.evaluation_table[zkey] = new
-            # record the FEN (only first occurrence is kept)
+
             self.zkey_to_fen.setdefault(zkey, fen)
-            # update per-key stats
-            stats = self.zkey_stats.get(zkey, {"visits": 0, "last_seen": None})
-            stats["visits"]   += 1
-            stats["last_seen"] = datetime.datetime.utcnow().timestamp()
-            self.zkey_stats[zkey] = stats
-            next_v = new if white_to_move else -new
+            st = self.zkey_stats.get(zkey, {"visits": 0, "last_seen": None})
+            st["visits"] += 1
+            st["last_seen"] = datetime.datetime.utcnow().timestamp()
+            self.zkey_stats[zkey] = st
+
+            dprint("TD‑update z=%016x old=%.3f new=%.3f", zkey, old, new)
+            next_v = new if white_move else -new
 
         self.games_since_save += 1
         if self.games_since_save >= self.save_interval:
@@ -369,155 +326,45 @@ class ChessBotAgent:
                 with open(self._table_path, "rb") as f:
                     return pickle.load(f)
             except Exception as e:
-                print("⚠️  could not load table:", e)
+                print("⚠️  could not load eval table:", e)
         return {}
 
     def _save_table(self):
         os.makedirs(os.path.dirname(self._table_path), exist_ok=True)
-        # save Zobrist-keyed table
         with open(self._table_path, "wb") as f:
             pickle.dump(self.evaluation_table, f)
-
         with open(self._table_path.replace(".pkl", "_zkey2fen.pkl"), "wb") as f:
             pickle.dump(self.zkey_to_fen, f)
-
-        # also save per-key stats
-        stats_path = self._table_path.replace(".pkl", "_stats.pkl")
-        with open(stats_path, "wb") as f:
+        with open(self._table_path.replace(".pkl", "_stats.pkl"), "wb") as f:
             pickle.dump(self.zkey_stats, f)
+        dprint("Saved table  entries=%d", len(self.evaluation_table))
 
-
-    def prune_table(self, max_entries: int, min_visits: int = 0):
-        """
-        Prune evaluation_table so it ends up with at most `max_entries` entries:
-        1. Keep every key that has no fen mapping (we never drop these).
-        2. Of the remaining mapped-and-eligible keys (visits ≥ min_visits),
-            keep the top (max_entries - num_unmapped) by visit count.
-        3. Drop all mapped keys whose visit count < min_visits.
-        4. Finally, drop everything else from evaluation_table, zkey_to_fen, and zkey_stats.
-        """
-        # 1) collect unmapped (always keep)
-        unmapped = set(self.evaluation_table) - set(self.zkey_to_fen)
-        num_unmapped = len(unmapped)
-
-        # 2) filter mapped keys by min_visits
-        #    (only consider keys that both have a fen mapping and a stats entry)
-        eligible_mapped = {
-            k for k in self.evaluation_table
-            if (k in self.zkey_to_fen
-                and k in self.zkey_stats
-                and self.zkey_stats[k]["visits"] >= min_visits)
-        }
-
-        # 3) how many “visited” slots remain?
-        slots_for_visited = max_entries - num_unmapped
-        if slots_for_visited < 0:
-            # too many unmapped → keep them all, drop all mapped
-            slots_for_visited = 0
-            print(
-                f"Warning: {num_unmapped} unmapped entries > max_entries={max_entries}. "
-                "Keeping all unmapped; dropping all mapped."
-            )
-
-        # 4) pick the top‐visited among eligible_mapped
-        #    sort by visits descending, then slice
-        sorted_by_visits = sorted(
-            eligible_mapped,
-            key=lambda k: self.zkey_stats[k]["visits"],
-            reverse=True
-        )
-        top_mapped = set(sorted_by_visits[:slots_for_visited])
-
-        # 5) final keep set = unmapped ∪ top_mapped
-        keep = unmapped | top_mapped
-
-        # 6) prune all three tables
-        self.evaluation_table = {
-            k: v for k, v in self.evaluation_table.items() if k in keep
-        }
-        self.zkey_to_fen = {
-            k: f for k, f in self.zkey_to_fen.items() if k in keep
-        }
-        self.zkey_stats = {
-            k: s for k, s in self.zkey_stats.items() if k in keep
-        }
-
-        print(
-            f"Pruned to {len(self.evaluation_table)} entries "
-            f"(target ≤ {max_entries}, min_visits={min_visits})."
-        )
-
+    # ───────── policy helpers (unchanged) ───────────────────────────────
+    def board_to_zkey(self, board):      # external tool hook
+        return zobrist.hash(board)
 
     def build_policy_table(self):
-        """
-        Build a policy table from zkey_to_fen and zkey_stats.
-        For each known Z-key (i.e. each FEN), we look at every legal move,
-        compute the child Z-key, fetch its visit count, and normalize.
-        """
         policy = {}
-
         for zkey, fen in self.zkey_to_fen.items():
             board = chess.Board(fen)
-            move_counts = {}
-
-            # 1) Gather visit counts for each legal continuation
-            for move in board.legal_moves:
-                board.push(move)
-                child_zkey = self.board_to_zkey(board)
+            counts = {}
+            for mv in board.legal_moves:
+                board.push(mv)
+                ck = zobrist.hash(board)
                 board.pop()
-
-                visits = self.zkey_stats.get(child_zkey, {}).get("visits", 0)
-                move_counts[move.uci()] = visits
-
-            # 2) Normalize into probabilities
-            total_visits = sum(move_counts.values())
-            if total_visits > 0:
-                policy[zkey] = {
-                    uci: visits / total_visits
-                    for uci, visits in move_counts.items()
-                }
-            else:
-                # fallback: uniform random if no data
-                n = len(move_counts)
-                if n:
-                    policy[zkey] = {uci: 1.0/n for uci in move_counts}
-                else:
-                    policy[zkey] = {}  # no legal moves (shouldn’t happen)
-
-        # Save it on the agent for later usage
-        self.policy_table = policy
+                counts[mv.uci()] = self.zkey_stats.get(ck, {}).get("visits", 0)
+            total = sum(counts.values())
+            if total:
+                policy[zkey] = {u: v / total for u, v in counts.items()}
+            elif counts:
+                n = len(counts)
+                policy[zkey] = {u: 1 / n for u in counts}
+        self.policy = policy
         return policy
 
-
-    def save_policy(self, path: str):
-        """Pickle out the policy table to disk."""
-        if not hasattr(self, "policy_table"):
-            raise RuntimeError("Policy table not built yet. Call build_policy_table() first.")
+    def save_policy(self, path):
+        if not self.policy:
+            raise RuntimeError("Call build_policy_table() first.")
         with open(path, "wb") as f:
-            pickle.dump(self.policy_table, f)
-        print(f"Policy table with {len(self.policy_table)} entries saved to {path}")
-
-
-    def board_to_zkey(self, board: chess.Board) -> int:
-        z = 0
-        # 1) piece placements
-        for sq, piece in board.piece_map().items():
-            # your zobrist_keys likely uses a tuple key like
-            # (piece_type, color, square)
-            z ^= self.zobrist_keys[(piece.piece_type, piece.color, sq)]
-
-        # 2) castling rights
-        # if you stored them under e.g. ("castle", right)
-        for right in [chess.BB_H1, chess.BB_A1, chess.BB_H8, chess.BB_A8]:
-            if board.has_castling_rights(right):
-                z ^= self.zobrist_keys[("castle", right)]
-
-        # 3) en-passant file
-        if board.ep_square is not None:
-            z ^= self.zobrist_keys[("ep", board.ep_square)]
-
-        # 4) side to move
-        if board.turn == chess.BLACK:
-            z ^= self.zobrist_keys["turn"]
-
-        return z
+            pickle.dump(self.policy, f)
+        print(f"Policy saved → {path}")
