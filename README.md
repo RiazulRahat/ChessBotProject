@@ -13,16 +13,27 @@ A modular, self-learning chess engine built with TD(0) learning, Zobrist hashing
 
 ## Current Features
 
-  At this level, the bot already supports:
+  Key Capabilities (2025‑05)
 
-- TD‑Learning Evaluation: a large Zobrist‑keyed eval table built via self‑play and bootstrapping capability with other bots
-- Positional Heuristics: piece‑square value tables, pawn structure, piece safety, development & king safety bonuses.
-- Quiescence Search as an Extension: lightweight capture‑only to eliminate horizon blunders
-- Zobrist Hashing & Pruning: fast 64‑bit state keys (upgrade from FEN) with pruning functionality to remove low‑value entries.
-- Policy Book Generation: offline policy compiled from the eval table for instant lookup in known positions.
-- Opening‑Book Integration: capability to load PGN books to steer the first dozen plies(moves) into meaningful theory lines.
-- Elo Evaluation Harness: automated matches vs. Stockfish version for strength estimation and tuning.
-- Pygame GUI: interactive human vs. bot play with timed, iterative‑deepening moves and policy fallback.
+- Transposition Table (TT) Cache – 64‑bit keyed, depth‑aware replacement that dramatically reduces re‑search of repeated positions.
+
+- Iterative Deepening / Alpha‑Beta Search – defaults to depth 3 (full ply) with PV‑move reordering; configurable per front‑end.
+
+- Quiescence Extension – capture‑only follow‑up out to 5 ply to remove horizon noise.
+
+- TD‑Learning Evaluation – >550 k Zobrist‑keyed positions learned via self‑play + Stockfish bootstrapping.
+
+- Positional Heuristics – piece‑square tables, pawn structure, development, king safety, mobility differential, bishop‑pair & passed‑pawn bonuses.
+
+- Zobrist Pruning Tools – scripts to convert, merge and prune massive eval tables.
+
+- Policy Book Generation – offline probability tables for instant move selection in known states.
+
+- Opening‑Book Support – load PGN theory lines into a lightweight opening book.
+
+- Elo Evaluation Harness – automated match runner vs. Stockfish (any elo level) with CSV output.
+
+- Pygame GUI – play against the engine, watch self‑play, or step through search in real‑time.
 
 ## Installation:
 
