@@ -94,4 +94,4 @@ Adjust these to tune difficulty or personality.
 
 
 
-# Policy might not work and will be playing against a 0 knowledge bot... pkl files too large for github
+Policy might not work and will be playing against a 0 knowledge bot... pkl files too large for github
