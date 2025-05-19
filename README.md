@@ -91,3 +91,7 @@ A modular, self-learning chess engine built with TD(0) learning, Zobrist hashing
 - Search settings (depth, quiescence, time-per-move) are in bot/chess_bot.py and pygame_bot_human.py.
   
 Adjust these to tune difficulty or personality.
+
+
+
+# Policy might not work and will be playing against a 0 knowledge bot... pkl files too large for github
