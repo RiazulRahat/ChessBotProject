@@ -112,18 +112,19 @@ class ChessBotAgent:
 
 
 
-    """
-    This Function takes in a Board state and returns the best move following a list of protocols
-
-    --- Accessibility: Public ---
-
-    Function: choose_move
-
-    Parameter: chess.Board class
-    Return: chess.Move class or None
-
-    """
     def choose_move(self, board: chess.Board):
+        """
+        This Function takes in a Board state and returns the best move following a list of protocols
+
+        --- Accessibility: Public ---
+
+        Function: choose_move
+
+        Parameter: chess.Board class
+        Return: chess.Move class or None
+
+        """
+        
         # save fen of parameter - board object
         fen = board.fen()
         # save zobrist hash of parameter - board object
@@ -181,67 +182,139 @@ class ChessBotAgent:
                 break
         return best
 
-    # ───────── alpha‑beta with TT ───────────────────────────────────────
-    def _alphabeta(self, board, depth, alpha, beta, maximise_white):
+    # ───────────── alpha‑beta with TT and Quiescence ────────────────────
+    def _alphabeta(self, board: chess.Board, depth: int, alpha: float, beta: float, maximise_white: bool):
+        """
+        α‑β search with transposition‐table and optional quiescence
+    
+        Recursively explores moves to the given depth, applying:
+        1. State guard (checkmate/draw).
+        2. TT lookup if a prior result at ≥ this depth is cached.
+        3. At depth == 0: optional quiescence extension, else static evaluation.
+        4. Main recursion with move ordering, α/β updates, and cutoffs.
+        5. TT storage of (depth, best_value, best_move).
+
+        --- Accessibility: Private ---
+
+        Function: _alphabeta
+
+        Parameters:
+        board           – a chess.Board object (mutated via push/pop)
+        depth           – remaining plies to search before quiescence(leaf)
+        alpha, beta     – current α (max lower bound) and β (min upper bound).
+        maximise_white  – True if this node maximizes(W), else minimizes(B)
+        Return: Tuple -> (value, best_move)
+        – `value` is the minimax score from this board position  
+        – `best_move` is the chosen chess.Move (or None for terminal/leaf)
+
+        """
+        
+        # save zobrist hash of parameter - board object
         key = zobrist.hash(board)
 
-        # ----- terminal position guard -------------
+        
+        # 1) No more legal moves --------------
         if board.is_game_over():
-            return self._state_value(board), None
-        # -------------------------------------------
+            # Expected: Checkmate -> large +ve/-ve score
+            #           Draw      -> neutral score
+            # returns (value, None)
+            return self._state_value(board), None # None because no 'best move' from ended game
+        # -------------------------------------
 
-        dprint("αβ d=%d α=%.1f β=%.1f maxW=%s hash=%016x",
-               depth, alpha, beta, maximise_white, key)
-
+        
+        # 2) Look-up Transposition-Table ------
+        
+        # if key exists AND stored_depth is >= current depth (deeper search done)
         if key in self.tt and self.tt[key][0] >= depth:
-            dprint("TT‑hit depth=%d  val=%.1f", self.tt[key][0], self.tt[key][1])
+            # return stored_value[1] and stored_move[2]
             return self.tt[key][1], self.tt[key][2]
+        # -------------------------------------
 
+        
+        # 3) Base case, depth == 0, Leaf Positions 
+        # Reached max given search depth ------
         if depth == 0:
-            # quiescence hit?
+            # quiescence hit before - uses special flag -1 for depth
             if key in self.tt and self.tt[key][0] == -1:
+                # return previous quiescence call
                 return self.tt[key][1], None
+            # if quiescence turned on AND game is not over (defensive call - repeated)
             if self.use_quiescence and not board.is_game_over():
-                self.quiesce_calls += 1
-                val = self.quiesce(board, alpha, beta,
-                                   board.turn == chess.WHITE, 0)
-                return val, None
-            return self._state_value(board), None
+                # quiescence calls count (not really needed) - Uncomment for debugging
+                #self.quiesce_calls += 1
 
+                # extends search to include all captures/checks from this position
+                val = self.quiesce(board, alpha, beta,
+                                board.turn == chess.WHITE, 0)
+                # returns a stable evaluation, than a raw evaluation score (slightly better)
+                return val, None
+            # if quiescence is diabled call static evaluation
+            return self._state_value(board), None
+        # -------------------------------------
+
+        
+        # ^^ Move is not in TT and depth>0 and game is not over ^^
+        
+        
+        # 4) Main Recursion Loop -----------------
         best_move = None
+        
+        # Loop through a sorted move list
+        # Sort: TT move -> Captures -> ...
         for mv in self._ordered_moves(board):
+            # apply move to board - for recursion only
             board.push(mv)
+            # recursive call - (depth-1) - flip maximise_white because turn changes
             val, _ = self._alphabeta(board, depth - 1,
-                                     alpha, beta, not maximise_white)
+                                    alpha, beta, not maximise_white)
+            # revert board
             board.pop()
 
+            # White's turn (Maximizer)
             if maximise_white:
+                # if the pushed move is better than alpha
                 if val > alpha:
+                    # update α and best_move (so far)
                     alpha, best_move = val, mv
+                # β‑cutoff: Black will avoid this position
                 if alpha >= beta:
+                    # no more search necessary because rest is avoided
                     break
+            # Black's turn (Minimizer)
             else:
+                # pushed move is better than beta
                 if val < beta:
+                    # update β and best_move (so far)
                     beta, best_move = val, mv
+                # α-cutoff: White will avoid this position
                 if beta <= alpha:
+                    # no more search necessary
                     break
 
-        # If no move survived (legal list might be empty in stalemate),
-        # fall back gracefully instead of crashing.
+        
+        # 5) If no move survived (legal moves might be empty in stalemate)
+        # fall back instead of crashing
         if best_move is None:
+            # if there is legal moves (rare case)
             moves = list(board.legal_moves)
+            # if case - pick one at random
             if moves:
                 best_move = random.choice(moves)
-            else:            # really no legal moves → treat as terminal
+            # really no legal moves → treat as stalemate
+            else:     
+                # static value
                 best_val = self._state_value(board)
+                # add to TT
                 self.tt[key] = (depth, best_val, None)
                 return best_val, None
 
+        # after if block ^ initialize the value to α for white and β for black
         best_val = alpha if maximise_white else beta
+        # add to TT
         self.tt[key] = (depth, best_val, best_move)
-        dprint("αβ‑ret d=%d  best=%s  val=%.1f",
-                depth, best_move.uci() if best_move else "?", best_val)
+
         return best_val, best_move
+
 
     # ───────── quiescence search ────────────────────────────────────────
     def quiesce(self, board, alpha, beta, maximise_white, ply):
