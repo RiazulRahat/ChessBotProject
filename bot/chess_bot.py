@@ -109,40 +109,65 @@ class ChessBotAgent:
         base = self.evaluation_table.get(key, self._material(board))
         return base + self.positional_weight * positional_score(board)
 
-    # ───────── public move pickers ──────────────────────────────────────
-    def choose_move(self, board: chess.Board):
-        fen = board.fen()
 
-        # 0) opening book
+
+
+    """
+    This Function takes in a Board state and returns the best move following a list of protocols
+
+    --- Accessibility: Public ---
+
+    Function: choose_move
+
+    Parameter: chess.Board class
+    Return: chess.Move class or None
+
+    """
+    def choose_move(self, board: chess.Board):
+        # save fen of parameter - board object
+        fen = board.fen()
+        # save zobrist hash of parameter - board object
+        z_key = zobrist.hash(board)
+
+        # 0) Opening Book Fall-Through ----------
         if fen in self.opening_book:
+            # Choose a random move from Moves (FEN->Moves)
             move = chess.Move.from_uci(random.choice(self.opening_book[fen]))
-            dprint("[BOOK] %s", move.uci())
+            # Choose the best move [0] from Opening book (Uncomment line below and comment above)
+            #move = chess.Move.from_uci(self.opening_book[fen][0])
             return move
 
-        # 1) learned policy
-        if self.use_policy and fen in self.policy and random.random() < self.policy_mix:
-            moves, probs = zip(*self.policy[fen].items())
+        # 1) Learned Policy Fall-Through --------
+        if self.use_policy and z_key in self.policy and random.random() < self.policy_mix: # Use policy - active AND board state in policy AND probability
+            # policy[key]-> Values -> moves - list of UCI, probs - list of Probabilities: π(s)
+            moves, probs = zip(*self.policy[z_key].items())
+            # Pick random element (UCI_move) from moves, using weights in probs
             mv = chess.Move.from_uci(random.choices(moves, probs)[0])
-            dprint("[POLICY] %s", mv.uci())
             return mv
 
+        #     Check if there is any legal moves OR if no legal moves(eg Game Over) return None
         legal = list(board.legal_moves)
         if not legal:
             return None
 
-        # 2) exploration
+        # 2) ε-greedy Exploration Rate - avoids overfitting on known paths ------
         if random.random() < self.exploration_rate:
+            # Choose random legal move
             mv = random.choice(legal)
-            dprint("[EXPLORE] %s", mv.uci())
             return mv
 
-        # 3) search
-        maximise_white = board.turn == chess.WHITE
+        # 3) Search ------------------------------
+        #    True if White's turn else False
+        maximise_white = (board.turn == chess.WHITE)
+        #    val - best_value, mv - best_move -> from αβ search (move object)
         val, mv = self._alphabeta(board, self.search_depth,
-                                  -INF, +INF, maximise_white)
-        dprint("[SEARCH] depth=%d  move=%s  val=%.1f",
-               self.search_depth, mv.uci() if mv else "?", val)
+                                -INF, +INF, maximise_white)
+        #    random legal move Fall-Back for no moves returned by αβ
         return mv or random.choice(legal)
+    
+
+
+
 
     def choose_move_timed(self, board: chess.Board, time_per_move: float):
         start = time.time()
