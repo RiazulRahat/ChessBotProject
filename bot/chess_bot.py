@@ -182,6 +182,8 @@ class ChessBotAgent:
                 break
         return best
 
+
+
     # ───────────── alpha‑beta with TT and Quiescence ────────────────────
     def _alphabeta(self, board: chess.Board, depth: int, alpha: float, beta: float, maximise_white: bool):
         """
@@ -316,83 +318,145 @@ class ChessBotAgent:
         return best_val, best_move
 
 
+
     # ───────── quiescence search ────────────────────────────────────────
-    def quiesce(self, board, alpha, beta, maximise_white, ply):
-        key = zobrist.hash(board)
-        if key in self.tt and self.tt[key][0] == -1:
-            dprint("QUI‑TT hit  val=%.1f", self.tt[key][1])
-            return self.tt[key][1]
+    def quiesce(self, board, alpha, beta, maximise_white, curr_depth):
+        """
+        This function extends the main α-β search in curr_depth layers deeper, for only captures
 
-        stand = self._state_value(board)
-        dprint("QUI ply=%d stand=%.1f α=%.1f β=%.1f", ply, stand, alpha, beta, lvl=2)
+        Parameters:
+            - board (chess.Board)
+            - alpha (maximizer value)
+            - beta (minimizer value)
+            - maximise_white (True if white's turn, else False)
+            - curr_depth (depth of quience search)
 
+        Returns: val (float)
+
+        Notes:
+        * **Soundness:** Only 'legal' captures are explored and the algorithm maintains the α/β invariants
+        * **Speed:** MVV-LVA ordering plus only captures so checks way less nodes
+        * **Transposition Table:** entries are stored with '-1' depth so main search can distinguish between quiescence vs α/β
+        """
+        # Store the zobrist value of board object
+        z_key = zobrist.hash(board)
+
+        # If key is in transposition table and previous quiescence search was done [-1]
+        if z_key in self.tt and self.tt[z_key][0] == -1:
+            return self.tt[z_key][1]    # return val
+
+        # 'static' board state value (val)
+        static_val = self._state_value(board)
+
+        # Compare static value
+        # if white's turn
         if maximise_white:
-            if stand >= beta:
+            if static_val >= beta:
                 return beta
-            alpha = max(alpha, stand)
+            alpha = max(alpha, static_val)
+        # if black's turn
         else:
-            if stand <= alpha:
+            if static_val <= alpha:
                 return alpha
-            beta = min(beta, stand)
+            beta = min(beta, static_val)
+        #update max-min values
 
-        if ply >= self.quiescence_depth:
-            self.tt[key] = (-1, stand, None)
-            dprint("QUI‑store leaf  val=%.1f", stand)
-            return stand
+        # limit search depth of quiescence
+        if curr_depth >= self.quiescence_depth:
+            # insert into transposition table
+            self.tt[z_key] = (-1, static_val, None)
+            return static_val
 
-        moves = [m for m in board.legal_moves if board.is_capture(m)]
+        # Filter: separate captures from all moves in a list
+        moves = [move for move in board.legal_moves if board.is_capture(move)]
+
+        # Sort: using MVV-LVA heuristics
+        #def capture_sort(move):
+            #return (-victim_value(board, move.to_square), attacker_value(board, move.from_square))
+    
+        #moves.sort(key=capture_sort)
+    
+        # One-liner sort
         moves.sort(key=lambda m: (-victim_value(board, m.to_square),
-                                  attacker_value(board, m.from_square)))
+                                attacker_value(board, m.from_square)))
 
-        for mv in moves:
-            gain = piece_value(board.piece_at(mv.to_square))
-            if maximise_white and stand + gain < alpha:
+        # iterate sorted move list
+        for m in moves:
+            # check the piece values
+            gain = piece_value(board.piece_at(m.to_square))
+        
+            # If best capture does not improve val, continue
+            if maximise_white and static_val + gain < alpha:
                 continue
-            if not maximise_white and stand - gain > beta:
+            if not maximise_white and static_val - gain > beta:
                 continue
+    
+            # Push the best move into the board
+            board.push(m)
 
-            board.push(mv)
+            # Recursion - same alpha beta bounds, flip turn, increase depth by 1
             score = self.quiesce(board, alpha, beta,
-                                 not maximise_white, ply + 1)
+                                not maximise_white, curr_depth + 1)
+            # Pop to restore position
             board.pop()
 
+            # returns for cutoffs
             if maximise_white:
                 if score >= beta:
-                    self.tt[key] = (-1, beta, None)
+                    self.tt[z_key] = (-1, beta, None)
                     return beta
                 alpha = max(alpha, score)
             else:
                 if score <= alpha:
-                    self.tt[key] = (-1, alpha, None)
+                    self.tt[z_key] = (-1, alpha, None)
                     return alpha
                 beta = min(beta, score)
 
+        # Final Quiescence score
         result = alpha if maximise_white else beta
-        self.tt[key] = (-1, result, None)
+        # Add to transposition table
+        self.tt[z_key] = (-1, result, None)
+    
         return result
+
 
     # ───────── move ordering ────────────────────────────────────────────
     def _ordered_moves(self, board):
-        caps, checks, quiet = [], [], []
-        for mv in board.legal_moves:
-            if board.is_capture(mv):
-                caps.append(mv)
-            elif board.gives_check(mv):
-                checks.append(mv)
-            else:
-                quiet.append(mv)
+        """
+        'Move Ordering' heuristic that makes α‑β search more efficient by trying the best moves first
+        """
+        # categorizing moves into lists
+        caps = []    # All captures
+        checks = []  # 
+        quiet = []   # Not captures/checks
 
-        def mvv_lva(m):
-            victim = chess.PAWN if board.is_en_passant(m) else \
-                     (board.piece_at(m.to_square).piece_type
-                      if board.piece_at(m.to_square) else 0)
-            attacker = board.piece_at(m.from_square).piece_type
+        # Iterate through the legal moves and add to empty lists
+        for move in board.legal_moves:
+            if board.is_capture(move):
+                caps.append(move)
+            elif board.gives_check(move):
+                checks.append(move)
+            else:
+                quiet.append(move)
+
+        # Most-Valuable-Victim, Least_Valuable_Attacker Key
+        def mvv_lva(move):
+            # Pawn for en_passant, else captured piece or 0
+            victim = chess.PAWN if board.is_en_passant(move) else \
+                    (board.piece_at(move.to_square).piece_type
+                    if board.piece_at(move.to_square) else 0)
+            # Attacking Piece
+            attacker = board.piece_at(move.from_square).piece_type
+            
             return (-victim, attacker)
 
+        # sort by the mvv_lva value - explored first
         caps.sort(key=mvv_lva)
-        # deterministic ordering keeps search results stable
-        quiet.sort(key=lambda m: m.uci())
+        # sort alphabetically by UCI string
+        quiet.sort(key=lambda move: move.uci())
+        # Concatenate in order
         return caps + checks + quiet
+
 
     # ───────── TD‑0 update & persistence ────────────────────────────────
     def update_evaluation(self, history, result):
