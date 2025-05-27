@@ -85,7 +85,7 @@ KNIGHT_TABLE = [
    -50, -40, -30, -30, -30, -30, -40, -50,
 ]
 
-# Centralization -----------------------------
+# Rest of the Pieces -----------------------------
 BISHOP_TABLE = [
    -20, -10, -10, -10, -10, -10, -10, -20,
    -10,   0,   0,   0,   0,   0,   0, -10,
@@ -174,6 +174,7 @@ def piece_square_bonus(board: chess.Board) -> float:
         if not p:
             continue
         table = None
+        # Piece type - pt
         pt    = p.piece_type
         # Map the table to piece type
         if   pt == chess.PAWN:   table = PAWN_TABLE
@@ -183,10 +184,11 @@ def piece_square_bonus(board: chess.Board) -> float:
         elif pt == chess.QUEEN:  table = QUEEN_TABLE
         elif pt == chess.KING:
             # KING --> choose Midgame vs Endgame : based on material 
-            total_material = sum(
-                len(board.pieces(t, chess.WHITE)) + len(board.pieces(t, chess.BLACK))
-                for t in (chess.QUEEN, chess.ROOK, chess.BISHOP, chess.KNIGHT)
-            )
+            total_material = 0
+            for t in (chess.QUEEN, chess.ROOK, chess.KNIGHT, chess.BISHOP):
+                total_material += (len(board.pieces(t, chess.WHITE)) + 
+                                   len(board.pieces(t, chess.BLACK))
+                                  )
             table = KING_END_TABLE if total_material < 14 else KING_MID_TABLE
 
         if table:

@@ -8,7 +8,6 @@ if PROJECT_ROOT not in sys.path:
 # ────────────────────────────────────────────────────────────────────────────
 
 import chess
-from bot.chess_bot import ChessBotAgent
 from bot.chess_bot import ChessBotAgent, zobrist
 
 import pickle
@@ -17,7 +16,6 @@ fen_map = {}   # will collect key → fen
 FEN_MAP_OUT = os.path.join(os.path.dirname(__file__), "fen_map_live.pkl")
 # ─────────────────────────────────────────────────────────────────────────
 
-# Instantiate your bot with desired params
 agent = None
 try:
     agent = ChessBotAgent(
@@ -27,8 +25,7 @@ try:
          save_interval=1,
          use_quiescence=True,
          quiescence_depth=5,
-         save_interval=1,
-         policy_path="bot/policy_table_v1.pkl"
+         policy_path=os.path.join(PROJECT_ROOT, "bot", "policy_table_v1.pkl")
      )
 except Exception:
     traceback.print_exc()

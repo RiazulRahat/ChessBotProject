@@ -9,7 +9,7 @@ from bot.evaluation.positional_heuristics import positional_score
 
 # ────────────────────────────────────────────────────────────────────────
 TABLE_FILE = "bot/evaluation_table_current/eval_table_zobrist_pruned.pkl"
-DRAW_BIAS  = 0.0
+DRAW_BIAS  = -0.15
 INF        = float("inf")
 
 # unified piece values (centipawns)
@@ -93,7 +93,7 @@ class ChessBotAgent:
         dprint("Bot created  LR=%.3f  ε=%.3f  depth=%d",
                self.learning_rate, self.exploration_rate, self.search_depth)
 
-    # ───────── evaluation helpers ───────────────────────────────────────
+    # ───────── evaluation helper function──────────────────────────
     @staticmethod
     def _material(board: chess.Board) -> float:
         vals = {chess.PAWN: 1, chess.KNIGHT: 3, chess.BISHOP: 3,
@@ -163,6 +163,7 @@ class ChessBotAgent:
         #    val - best_value, mv - best_move -> from αβ search (move object)
         val, mv = self._alphabeta(board, self.search_depth,
                                 -INF, +INF, maximise_white)
+
         #    random legal move Fall-Back for no moves returned by αβ
         return mv or random.choice(legal)
     
@@ -184,7 +185,6 @@ class ChessBotAgent:
 
 
 
-    # ───────────── alpha‑beta with TT and Quiescence ────────────────────
     def _alphabeta(self, board: chess.Board, depth: int, alpha: float, beta: float, maximise_white: bool):
         """
         α‑β search with transposition‐table and optional quiescence
@@ -210,9 +210,14 @@ class ChessBotAgent:
         – `best_move` is the chosen chess.Move (or None for terminal/leaf)
 
         """
+
         
-        # save zobrist hash of parameter - board object
+        # save 'zobrist' hash of parameter - board object
         key = zobrist.hash(board)
+
+        #####
+        if board.is_repetition(3) or board.can_claim_fifty_moves():
+            return DRAW_BIAS, None
 
         
         # 1) No more legal moves --------------
