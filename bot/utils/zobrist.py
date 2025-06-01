@@ -11,11 +11,11 @@ import chess
 # + 16 for castling rights
 # + 8 for en-passant file
 # =====================================================
-NUM_KEYS = 12*64 + 1 + 16 + 8
+NUM_KEYS = 12*64 + 1 + 16 + 8 # 793 keys in total
 
 
 # Function:    Random Number Generator
-def _random_64():
+def _randomNumberGenerator():
     return random.getrandbits(64)
 
 
@@ -30,19 +30,18 @@ class Zobrist:
 
 
     # Class Definition =========================================
-    def __init__(self, key_path="bot/zobrist_keys.pkl"):
+    def __init__(self, key_path="zobrist_keys.pkl"):
         self.key_path = key_path
         if os.path.exists(key_path):
             with open(key_path, 'rb') as f:
                 self.keys = pickle.load(f)
         else:
             # Generating a new zobrist converting table for the board pieces
-            self.keys = [_random_64() for _ in range(NUM_KEYS)]
+            self.keys = [_randomNumberGenerator() for _num in range(NUM_KEYS)]
             os.makedirs(os.path.dirname(key_path), exist_ok=True)
             with open(key_path, 'wb') as f:
                 pickle.dump(self.keys, f)
     # ===========================================================
-
 
     # ============================================================
     # Method :   hash
@@ -87,9 +86,5 @@ class Zobrist:
         # -----------------------
     # ============================================================
 
-
-
-
 # Shared zobrist object 
 zobrist = Zobrist()
-

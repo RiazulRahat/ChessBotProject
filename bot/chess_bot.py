@@ -210,14 +210,9 @@ class ChessBotAgent:
         – `best_move` is the chosen chess.Move (or None for terminal/leaf)
 
         """
-
         
-        # save 'zobrist' hash of parameter - board object
-        key = zobrist.hash(board)
-
-        #####
-        if board.is_repetition(3) or board.can_claim_fifty_moves():
-            return DRAW_BIAS, None
+        # save zobrist hash of parameter - board object
+        z_key = zobrist.hash(board)
 
         
         # 1) No more legal moves --------------
@@ -231,10 +226,10 @@ class ChessBotAgent:
         
         # 2) Look-up Transposition-Table ------
         
-        # if key exists AND stored_depth is >= current depth (deeper search done)
-        if key in self.tt and self.tt[key][0] >= depth:
+        # if z_key exists AND stored_depth is >= current depth (deeper search done)
+        if z_key in self.tt and self.tt[z_key][0] >= depth:
             # return stored_value[1] and stored_move[2]
-            return self.tt[key][1], self.tt[key][2]
+            return self.tt[z_key][1], self.tt[z_key][2]
         # -------------------------------------
 
         
@@ -242,9 +237,9 @@ class ChessBotAgent:
         # Reached max given search depth ------
         if depth == 0:
             # quiescence hit before - uses special flag -1 for depth
-            if key in self.tt and self.tt[key][0] == -1:
+            if z_key in self.tt and self.tt[z_key][0] == -1:
                 # return previous quiescence call
-                return self.tt[key][1], None
+                return self.tt[z_key][1], None
             # if quiescence turned on AND game is not over (defensive call - repeated)
             if self.use_quiescence and not board.is_game_over():
                 # quiescence calls count (not really needed) - Uncomment for debugging
@@ -273,7 +268,7 @@ class ChessBotAgent:
             board.push(mv)
             # recursive call - (depth-1) - flip maximise_white because turn changes
             val, _ = self._alphabeta(board, depth - 1,
-                                    alpha, beta, not maximise_white)
+                                alpha, beta, not maximise_white)
             # revert board
             board.pop()
 
@@ -312,13 +307,13 @@ class ChessBotAgent:
                 # static value
                 best_val = self._state_value(board)
                 # add to TT
-                self.tt[key] = (depth, best_val, None)
+                self.tt[z_key] = (depth, best_val, None)
                 return best_val, None
 
         # after if block ^ initialize the value to α for white and β for black
         best_val = alpha if maximise_white else beta
         # add to TT
-        self.tt[key] = (depth, best_val, best_move)
+        self.tt[z_key] = (depth, best_val, best_move)
 
         return best_val, best_move
 
@@ -463,7 +458,7 @@ class ChessBotAgent:
         return caps + checks + quiet
 
 
-    # ───────── TD‑0 update & persistence ────────────────────────────────
+    # TD(0) Learning Core
     def update_evaluation(self, history, result):
         next_v = 1.0 if result == "1-0" else -1.0 if result == "0-1" else DRAW_BIAS
         for zkey, white_move, fen in reversed(history):
@@ -478,7 +473,6 @@ class ChessBotAgent:
             st["last_seen"] = datetime.datetime.utcnow().timestamp()
             self.zkey_stats[zkey] = st
 
-            dprint("TD‑update z=%016x old=%.3f new=%.3f", zkey, old, new)
             next_v = new if white_move else -new
 
         self.games_since_save += 1
