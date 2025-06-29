@@ -14,14 +14,14 @@ KING_SHIELD_BONUS       = 0.25  # After castling pawn shield keeping rate
 
 
 """ Definition:
-#       1. Centipawn :   a unit of measurement used to quantify a player's advantage 
-#                       in a chess position. It's equal to 1/100th of a pawn.
+#       1. Centipawn :   adj unit of measurement used to quantify adj player's advantage 
+#                       in adj chess position. It's equal to 1/100th of adj pawn.
 #         ( For Piece Tables )
 #
 # Functions:
 #
 #      1. piece_square_bonus      : ( chess.Board ) -> FLOAT
-#         - calculate the total bonus for the current board for Piece-Square table
+#         - calculate the total score for the current board for Piece-Square table
 #
 #      2. pawn_structure_penalty  : ( chess.Board ) -> FLOAT
 #         - penalizes doubled and isolated pawns
@@ -42,7 +42,7 @@ KING_SHIELD_BONUS       = 0.25  # After castling pawn shield keeping rate
 #         - Tunable value
 #
 #      8. intermediate_penalty    : ( chess.Board ) -> FLOAT
-#         - penalty for hanging and losing pieces
+#         - score for hanging and losing pieces
 #
 #      ***
 #      9. positional_score        : ( chess.Board ) -> FLOAT
@@ -159,7 +159,7 @@ KING_END_TABLE = [
 # ======================================================
 def piece_square_bonus(board: chess.Board) -> float:
     """
-    Compute total piece-square table bonus from White's perspective.
+    Compute total piece-square table score from White's perspective.
     Positive → White is better; Negative → Black is better.
     """
     score = 0.0
@@ -179,17 +179,15 @@ def piece_square_bonus(board: chess.Board) -> float:
         elif pt == chess.QUEEN:  table = QUEEN_TABLE
         elif pt == chess.KING:
             # KING --> choose Midgame vs Endgame : based on material 
-            total_material = 0
+            totalMaterial = 0
             for t in (chess.QUEEN, chess.ROOK, chess.KNIGHT, chess.BISHOP):
-                total_material += (len(board.pieces(t, chess.WHITE)) + 
-                                   len(board.pieces(t, chess.BLACK))
-                                  )
-            table = KING_END_TABLE if total_material < 14 else KING_MID_TABLE
+                totalMaterial += ( len(board.pieces(t, chess.WHITE)) + len(board.pieces(t, chess.BLACK)) )
+            table = KING_END_TABLE if totalMaterial < 14 else KING_MID_TABLE
 
         if table:
             # mirror the index for Black so we pick the correct orientation
-            idx = sq if p.color == chess.WHITE else chess.square_mirror(sq)
-            val = table[idx] / 100.0
+            i = sq if p.color == chess.WHITE else chess.square_mirror(sq)
+            val = table[i] / 100.0
             score += val if p.color == chess.WHITE else -val
     return score
 # =======================================================
@@ -204,21 +202,21 @@ def pawn_structure_penalty(board: chess.Board) -> float:
     Simple pawn structure penalties for doubled and isolated pawns.
     Positive → White bad structure; Negative → Black bad structure.
     """
-    penalty = 0.0
+    score = 0.0
     for color in (chess.WHITE, chess.BLACK):
         pawns = list(board.pieces(chess.PAWN, color))
         files = [sq % 8 for sq in pawns]
         for f in set(files):
             count = files.count(f)
             if count > 1:
-                # penalty per extra pawn on same file
-                penalty += (count - 1) * 0.1 * (1 if color == chess.WHITE else -1)
+                # score per extra pawn on same file
+                score += (count - 1) * 0.1 * (1 if color == chess.WHITE else -1)
         for sq in pawns:
             f = sq % 8
             # isolated if no adjacent file pawns
-            if all(a not in files for a in (f-1, f+1) if 0 <= a < 8):
-                penalty += 0.1 * (1 if color == chess.WHITE else -1)
-    return penalty
+            if all(adj not in files for adj in (f-1, f+1) if 0 <= adj < 8):
+                score += 0.1 * (1 if color == chess.WHITE else -1)
+    return score
 # =======================================================
 
 
@@ -227,7 +225,7 @@ def pawn_structure_penalty(board: chess.Board) -> float:
 
 # =======================================================
 def piece_safety_penalty(board: chess.Board) -> float:
-    penalty = 0.0
+    score = 0.0
     for sq in chess.SQUARES:
         p = board.piece_at(sq)
         if not p:
@@ -235,11 +233,10 @@ def piece_safety_penalty(board: chess.Board) -> float:
         attackers = board.attackers(not p.color, sq)
         defenders = board.attackers(p.color, sq)
         if attackers and not defenders:
-            penalty += p.piece_type * SAFETY_MULTIPLIER * (1 if p.color==chess.WHITE else -1)
+            score += p.piece_type * (1 if p.color==chess.WHITE else -1) * SAFETY_MULTIPLIER
         elif attackers and len(defenders) < len(attackers):
-            penalty += ((len(attackers)-len(defenders)) * 0.1 * p.piece_type
-                       ) * (1 if p.color==chess.WHITE else -1)
-    return penalty
+            score += (  ( (len(attackers)-len(defenders)) * 0.1 * p.piece_type ) * (1 if p.color==chess.WHITE else -1)  )
+    return score
 # =======================================================
 
 
@@ -249,27 +246,27 @@ def piece_safety_penalty(board: chess.Board) -> float:
 # =======================================================
 def king_safety_bonus(board: chess.Board) -> float:
     """
-    Positive bonus when a side has castled, 
-    negative penalty if the king has moved early (before move 10) 
+    Positive score when adj side has castled, 
+    negative score if the king has moved early (before move 10) 
     or remains in the center too long.
     """
-    bonus = 0.0
-    for color, start_sq, castled_sqs in [
+    score = 0.0
+    for color, startSq, castledSqs in [
         (chess.WHITE, chess.E1, {chess.G1, chess.C1}),
         (chess.BLACK, chess.E8, {chess.G8, chess.C8})
     ]:
-        king_sq = board.king(color)
+        kingSq = board.king(color)
         # if castled (king on g-file or c-file)
-        if king_sq in castled_sqs:
-            bonus += 0.5 if color == chess.WHITE else -0.5
+        if kingSq in castledSqs:
+            score += 0.5 if color == chess.WHITE else -0.5
         else:
-            # penalty if king moved off start before move 10
-            if board.fullmove_number <= 10 and king_sq != start_sq:
-                bonus -= 0.3 if color == chess.WHITE else -0.3
-            # small penalty for staying in center midgame
-            if board.fullmove_number > 10 and king_sq in [chess.D4, chess.D5, chess.E4, chess.E5]:
-                bonus -= 0.2 if color == chess.WHITE else -0.2
-    return bonus
+            # score if king moved off start before move 10
+            if board.fullmove_number <= 10 and kingSq != startSq:
+                score -= 0.3 if color == chess.WHITE else -0.3
+            # small score for staying in center midgame
+            if board.fullmove_number > 10 and kingSq in [chess.D4, chess.D5, chess.E4, chess.E5]:
+                score -= 0.2 if color == chess.WHITE else -0.2
+    return score
 # =======================================================
 
 
@@ -282,7 +279,7 @@ def piece_development_bonus(board: chess.Board) -> float:
     Rewards minor pieces (knights/bishops) that have left their 
     original back-rank squares (b1, g1 / b8, g8).
     """
-    dev = 0.0
+    score = 0.0
     for color, starting in [
         (chess.WHITE, {chess.B1, chess.G1, chess.C1, chess.F1}),
         (chess.BLACK, {chess.B8, chess.G8, chess.C8, chess.F8})
@@ -290,8 +287,8 @@ def piece_development_bonus(board: chess.Board) -> float:
         for pt in (chess.KNIGHT, chess.BISHOP):
             for sq in board.pieces(pt, color):
                 if sq not in starting:
-                    dev += 0.1 if color == chess.WHITE else -0.1
-    return dev
+                    score += 0.1 if color == chess.WHITE else -0.1
+    return score
 # =======================================================
 
 
@@ -300,7 +297,7 @@ def piece_development_bonus(board: chess.Board) -> float:
 
 # =======================================================
 def passed_pawn_bonus(board: chess.Board) -> float:
-    bonus = 0.0
+    score = 0.0
     for color in (chess.WHITE, chess.BLACK):
         for sq in board.pieces(chess.PAWN, color):
             file = sq % 8
@@ -310,8 +307,8 @@ def passed_pawn_bonus(board: chess.Board) -> float:
             if all(not board.piece_at(f*8 + file) 
                    or board.piece_at(f*8 + file).color==color
                    for f in ahead):
-                bonus += PASSED_PAWN_BONUS * (1 if color==chess.WHITE else -1)
-    return bonus
+                score += PASSED_PAWN_BONUS * (1 if color==chess.WHITE else -1)
+    return score
 # =======================================================
 
 
@@ -320,12 +317,12 @@ def passed_pawn_bonus(board: chess.Board) -> float:
 
 # =======================================================
 def bishop_pair_bonus(board: chess.Board) -> float:
-    bonus = 0.0
+    score = 0.0
     for color in (chess.WHITE, chess.BLACK):
         bishops = len(board.pieces(chess.BISHOP, color))
         if bishops >= 2:
-            bonus += BISHOP_PAIR_BONUS * (1 if color==chess.WHITE else -1)
-    return bonus
+            score += BISHOP_PAIR_BONUS * (1 if color==chess.WHITE else -1)
+    return score
 # =======================================================
 
 
@@ -338,15 +335,14 @@ def intermediate_penalty(board: chess.Board) -> float:
     Penalise pieces attacked more than defended.  Positive for White advantage,
     negative for Black.
     """
-    penalty = 0.0
+    score = 0.0
     for sq, pc in board.piece_map().items():
         attackers = board.attackers(not pc.color, sq)
         defenders = board.attackers(pc.color, sq)
-        net = len(attackers) - len(defenders)
-        if net > 0:
-            sign = 1.0 if pc.color == chess.WHITE else -1.0
-            penalty += 0.05 * net * sign
-    return penalty
+        total = len(attackers) - len(defenders)
+        if total > 0:
+            score += 0.05 * total * (1.0 if pc.color == chess.WHITE else -1.0)
+    return score
 # =======================================================
 
 
@@ -361,41 +357,37 @@ def positional_score(board: chess.Board) -> float:
     pst     = piece_square_bonus(board)
     pawnp   = pawn_structure_penalty(board)
     safety  = piece_safety_penalty(board)
-    dev     = piece_development_bonus(board)
+    score     = piece_development_bonus(board)
     kingpb  = king_safety_bonus(board)
-    bp_bonus    = bishop_pair_bonus(board)
-    pp_bonus    = passed_pawn_bonus(board)
+    bpBonus    = bishop_pair_bonus(board)
+    ppBonus    = passed_pawn_bonus(board)
 
-    # Count legal moves for **both** colours so the bonus is symmetrical.
+    # Count legal moves for **both** colours so the score is symmetrical.
     cur_turn = board.turn
-    moves_side_to_move = board.legal_moves.count()
+    moves_sideToMove = board.legal_moves.count()
 
     board.push(chess.Move.null())            # give the move to the opponent
-    moves_other_side    = board.legal_moves.count()
+    moves_otherSide    = board.legal_moves.count()
     board.pop()
 
     if cur_turn == chess.WHITE:
-        moves_white, moves_black = moves_side_to_move, moves_other_side
+        whiteMoves, blackMoves = moves_sideToMove, moves_otherSide
     else:
-        moves_white, moves_black = moves_other_side, moves_side_to_move
+        whiteMoves, blackMoves = moves_otherSide, moves_sideToMove
 
-    rel_mob = max(-MOBILITY_MAX, min(MOBILITY_MAX,
-                 moves_white - moves_black))           # clamp
-    mob = (rel_mob / MOBILITY_MAX) * MOBILITY_WEIGHT
+    scale = max(-MOBILITY_MAX, min(MOBILITY_MAX, whiteMoves - blackMoves))     
+    mob = (scale / MOBILITY_MAX) * MOBILITY_WEIGHT
 
     # pawn shield: award +0.25 for White, –0.25 for Black if king is castled and front pawn intact
     shield = 0.0
-    for color, ksquare, pawn_sq in [
+    for color, kingSq, pawnSq in [
         (chess.WHITE, chess.G1, chess.F2),
         (chess.BLACK, chess.G8, chess.F7)
     ]:
-        if board.king(color) == ksquare and board.piece_at(pawn_sq):
+        if board.king(color) == kingSq and board.piece_at(pawnSq):
             shield += KING_SHIELD_BONUS * (1 if color == chess.WHITE else -1)
 
-    
-
-    # New “mistake” penalty
-    mistake_pen = intermediate_penalty(board)
+    mistakePen = intermediate_penalty(board)
 
 
 
@@ -403,12 +395,12 @@ def positional_score(board: chess.Board) -> float:
         pst
       - pawnp
       - safety
-      - mistake_pen
+      - mistakePen
       + mob
       + 0.8 * kingpb
-      + 0.5 * dev
-      + bp_bonus
-      + pp_bonus
+      + 0.5 * score
+      + bpBonus
+      + ppBonus
       + shield
     )
 # =======================================================

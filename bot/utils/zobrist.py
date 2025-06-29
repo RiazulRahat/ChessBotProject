@@ -4,6 +4,8 @@ import os
 import pickle
 import random
 import chess
+
+DEFAULT_KEY_PATH = os.path.join(os.path.dirname(__file__), "zobrist_keys.pkl")
 # =====================================================
 # Number of random 64-bit keys:
 # 12 piece types (6 white + 6 black) × 64 squares
@@ -30,7 +32,9 @@ class Zobrist:
 
 
     # Class Definition =========================================
-    def __init__(self, key_path="zobrist_keys.pkl"):
+    def __init__(self, key_path: str | None = None):
+        if key_path is None:
+            key_path = DEFAULT_KEY_PATH
         self.key_path = key_path
         if os.path.exists(key_path):
             with open(key_path, 'rb') as f:

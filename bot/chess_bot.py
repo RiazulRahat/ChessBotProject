@@ -40,10 +40,10 @@ class ChessBotAgent:
                  save_interval=50,
                  table_path=TABLE_FILE,
                  policy_path=None,
-                 policy_mix=0.1,
+                 policyMix=0.1,
                  search_depth=3,
                  positional_weight=1.0,
-                 use_policy=True,
+                 usePolicy=True,
                  use_quiescence=False,
                  quiescence_depth=5,
                  zobrist_keys_path="bot/zobrist_keys.pkl"):
@@ -55,8 +55,8 @@ class ChessBotAgent:
         self.save_interval     = save_interval
         self.search_depth      = max(1, search_depth)
         self.positional_weight = positional_weight
-        self.use_policy        = use_policy
-        self.policy_mix        = policy_mix
+        self.usePolicy        = usePolicy
+        self.policyMix        = policyMix
         self.use_quiescence    = use_quiescence
         self.quiescence_depth  = quiescence_depth
 
@@ -128,7 +128,7 @@ class ChessBotAgent:
         # save fen of parameter - board object
         fen = board.fen()
         # save zobrist hash of parameter - board object
-        z_key = zobrist.hash(board)
+        zKey = zobrist.hash(board)
 
         # 0) Opening Book Fall-Through ----------
         if fen in self.opening_book:
@@ -139,9 +139,9 @@ class ChessBotAgent:
             return move
 
         # 1) Learned Policy Fall-Through --------
-        if self.use_policy and z_key in self.policy and random.random() < self.policy_mix: # Use policy - active AND board state in policy AND probability
+        if self.usePolicy and zKey in self.policy and random.random() < self.policyMix: # Use policy - active AND board state in policy AND probability
             # policy[key]-> Values -> moves - list of UCI, probs - list of Probabilities: π(s)
-            moves, probs = zip(*self.policy[z_key].items())
+            moves, probs = zip(*self.policy[zKey].items())
             # Pick random element (UCI_move) from moves, using weights in probs
             mv = chess.Move.from_uci(random.choices(moves, probs)[0])
             return mv
@@ -212,7 +212,7 @@ class ChessBotAgent:
         """
         
         # save zobrist hash of parameter - board object
-        z_key = zobrist.hash(board)
+        zKey = zobrist.hash(board)
 
         
         # 1) No more legal moves --------------
@@ -226,10 +226,10 @@ class ChessBotAgent:
         
         # 2) Look-up Transposition-Table ------
         
-        # if z_key exists AND stored_depth is >= current depth (deeper search done)
-        if z_key in self.tt and self.tt[z_key][0] >= depth:
+        # if zKey exists AND stored_depth is >= current depth (deeper search done)
+        if zKey in self.tt and self.tt[zKey][0] >= depth:
             # return stored_value[1] and stored_move[2]
-            return self.tt[z_key][1], self.tt[z_key][2]
+            return self.tt[zKey][1], self.tt[zKey][2]
         # -------------------------------------
 
         
@@ -237,9 +237,9 @@ class ChessBotAgent:
         # Reached max given search depth ------
         if depth == 0:
             # quiescence hit before - uses special flag -1 for depth
-            if z_key in self.tt and self.tt[z_key][0] == -1:
+            if zKey in self.tt and self.tt[zKey][0] == -1:
                 # return previous quiescence call
-                return self.tt[z_key][1], None
+                return self.tt[zKey][1], None
             # if quiescence turned on AND game is not over (defensive call - repeated)
             if self.use_quiescence and not board.is_game_over():
                 # quiescence calls count (not really needed) - Uncomment for debugging
@@ -307,13 +307,13 @@ class ChessBotAgent:
                 # static value
                 best_val = self._state_value(board)
                 # add to TT
-                self.tt[z_key] = (depth, best_val, None)
+                self.tt[zKey] = (depth, best_val, None)
                 return best_val, None
 
         # after if block ^ initialize the value to α for white and β for black
         best_val = alpha if maximise_white else beta
         # add to TT
-        self.tt[z_key] = (depth, best_val, best_move)
+        self.tt[zKey] = (depth, best_val, best_move)
 
         return best_val, best_move
 
@@ -339,11 +339,11 @@ class ChessBotAgent:
         * **Transposition Table:** entries are stored with '-1' depth so main search can distinguish between quiescence vs α/β
         """
         # Store the zobrist value of board object
-        z_key = zobrist.hash(board)
+        zKey = zobrist.hash(board)
 
         # If key is in transposition table and previous quiescence search was done [-1]
-        if z_key in self.tt and self.tt[z_key][0] == -1:
-            return self.tt[z_key][1]    # return val
+        if zKey in self.tt and self.tt[zKey][0] == -1:
+            return self.tt[zKey][1]    # return val
 
         # 'static' board state value (val)
         static_val = self._state_value(board)
@@ -364,7 +364,7 @@ class ChessBotAgent:
         # limit search depth of quiescence
         if curr_depth >= self.quiescence_depth:
             # insert into transposition table
-            self.tt[z_key] = (-1, static_val, None)
+            self.tt[zKey] = (-1, static_val, None)
             return static_val
 
         # Filter: separate captures from all moves in a list
@@ -403,19 +403,19 @@ class ChessBotAgent:
             # returns for cutoffs
             if maximise_white:
                 if score >= beta:
-                    self.tt[z_key] = (-1, beta, None)
+                    self.tt[zKey] = (-1, beta, None)
                     return beta
                 alpha = max(alpha, score)
             else:
                 if score <= alpha:
-                    self.tt[z_key] = (-1, alpha, None)
+                    self.tt[zKey] = (-1, alpha, None)
                     return alpha
                 beta = min(beta, score)
 
         # Final Quiescence score
         result = alpha if maximise_white else beta
         # Add to transposition table
-        self.tt[z_key] = (-1, result, None)
+        self.tt[zKey] = (-1, result, None)
     
         return result
 

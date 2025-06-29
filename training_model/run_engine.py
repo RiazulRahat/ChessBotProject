@@ -8,7 +8,8 @@ if PROJECT_ROOT not in sys.path:
 # ────────────────────────────────────────────────────────────────────────────
 
 import chess
-from bot.chess_bot import ChessBotAgent, zobrist
+from bot.chess_bot import ChessBotAgent
+from bot.utils.zobrist import zobrist
 
 import pickle
 # ─── Global Z→FEN map & dump path ────────────────────────────────────────
@@ -21,7 +22,7 @@ try:
     agent = ChessBotAgent(
          exploration_rate=0.01,
          search_depth=3,
-         use_policy=True,
+         usePolicy=True,
          save_interval=1,
          use_quiescence=True,
          quiescence_depth=5,
