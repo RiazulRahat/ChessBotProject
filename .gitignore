@@ -192,3 +192,10 @@ assets/
 
 # Ignore all Python pickle files
 *.pkl
+
+# — macOS metadata —
+.DS_Store
+**/.DS_Store
+
+# — Claude Code —
+CLAUDE.md
