@@ -48,24 +48,24 @@ class ChessBotAgent:
                  quiescence_depth=5,
                  zobrist_keys_path="bot/zobrist_keys.pkl"):
 
-        # ── knobs
+        # ── knobs --
         self.exploration_rate  = exploration_rate
         self.learning_rate     = learning_rate
         self.mobility_weight   = mobility_weight
         self.save_interval     = save_interval
         self.search_depth      = max(1, search_depth)
         self.positional_weight = positional_weight
-        self.usePolicy        = usePolicy
-        self.policyMix        = policyMix
+        self.usePolicy         = usePolicy
+        self.policyMix         = policyMix
         self.use_quiescence    = use_quiescence
         self.quiescence_depth  = quiescence_depth
 
-        # ── persistent tables
-        self._table_path   = table_path
+        # ── persistent tables --
+        self._table_path      = table_path
         self.evaluation_table = self._load_table()
         self.zkey_to_fen      = {}
         self.zkey_stats       = {}
-        self.tt               = {}          # key → (depth, value, bestMove)
+        self.tt               = {}   # key → (depth, value, bestMove)
 
         if os.path.exists(table_path.replace(".pkl", "_zkey2fen.pkl")):
             with open(table_path.replace(".pkl", "_zkey2fen.pkl"), "rb") as f:
@@ -146,7 +146,7 @@ class ChessBotAgent:
             mv = chess.Move.from_uci(random.choices(moves, probs)[0])
             return mv
 
-        #     Check if there is any legal moves OR if no legal moves(eg Game Over) return None
+        # Check if there is any legal moves OR if no legal moves(eg Game Over) return None
         legal = list(board.legal_moves)
         if not legal:
             return None
@@ -205,7 +205,7 @@ class ChessBotAgent:
         depth           – remaining plies to search before quiescence(leaf)
         alpha, beta     – current α (max lower bound) and β (min upper bound).
         maximise_white  – True if this node maximizes(W), else minimizes(B)
-        Return: Tuple -> (value, best_move)
+        Return: Tuple  -> (value, best_move)
         – `value` is the minimax score from this board position  
         – `best_move` is the chosen chess.Move (or None for terminal/leaf)
 
@@ -243,16 +243,16 @@ class ChessBotAgent:
             # if quiescence turned on AND game is not over (defensive call - repeated)
             if self.use_quiescence and not board.is_game_over():
                 # quiescence calls count (not really needed) - Uncomment for debugging
-                #self.quiesce_calls += 1
+                # self.quiesce_calls += 1
 
                 # extends search to include all captures/checks from this position
                 val = self.quiesce(board, alpha, beta,
                                 board.turn == chess.WHITE, 0)
                 # returns a stable evaluation, than a raw evaluation score (slightly better)
                 return val, None
-            # if quiescence is diabled call static evaluation
+            # if quiescence is disabled call static evaluation
             return self._state_value(board), None
-        # -------------------------------------
+        # ---------------------------------------
 
         
         # ^^ Move is not in TT and depth>0 and game is not over ^^
@@ -529,3 +529,5 @@ class ChessBotAgent:
         with open(path, "wb") as f:
             pickle.dump(self.policy, f)
         print(f"Policy saved → {path}")
+
+

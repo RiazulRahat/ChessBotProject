@@ -45,12 +45,12 @@ def main(total_games: int = DEFAULT_GAMES):
                           TABLE_PATH, search_depth=SEARCH_DEPTH,
                           positional_weight=POS_WEIGHT,
                           use_quiescence=USE_QUIESCENCE, quiescence_depth=QUIESCENCE_DEPTH,
-                          use_policy=False)
+                          usePolicy=False)
     bot_b = ChessBotAgent(INITIAL_EPS, LEARNING_RATE, MOB_WEIGHT, SAVE_INTERVAL,
                           TABLE_PATH, search_depth=SEARCH_DEPTH,
                           positional_weight=POS_WEIGHT,
                           use_quiescence=USE_QUIESCENCE, quiescence_depth=QUIESCENCE_DEPTH,
-                          use_policy=False)
+                          usePolicy=False)
 
     white_wins = black_wins = draws = 0
     eps = INITIAL_EPS

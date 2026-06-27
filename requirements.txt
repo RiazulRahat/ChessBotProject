@@ -1,2 +1,13 @@
-chess==1.11.2
-python-chess==1.999
+# Chess logic
+python-chess>=1.11
+
+# GUI
+pygame>=2.0
+
+# Testing
+pytest>=8.0
+
+# Lichess-bot integration (training_model/)
+requests
+pyyaml
+backoff
