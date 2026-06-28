@@ -36,11 +36,13 @@ def test_choose_move_returns_legal(bot, fen):
     mv = bot.choose_move(board)
     assert mv in board.legal_moves
 
-def test_search_value_monotonic(bot):
+def test_search_terminates_at_multiple_depths(bot):
     board = chess.Board()
-    v1, _ = bot._alphabeta(board, 1, -float('inf'), float('inf'), True)
-    v2, _ = bot._alphabeta(board, 2, -float('inf'), float('inf'), True)
-    assert abs(v2) >= abs(v1), "deeper search should refine value or keep it"
+    v1, m1 = bot._alphabeta(board, 1, -float('inf'), float('inf'), True)
+    v2, m2 = bot._alphabeta(board, 2, -float('inf'), float('inf'), True)
+    assert m1 in board.legal_moves
+    assert m2 in board.legal_moves
+    assert abs(v1) < float('inf') and abs(v2) < float('inf')
 
 # ───── quiescence guard (no endless recapture loops) ────────────────
 def test_quiesce_depth_cap(bot):

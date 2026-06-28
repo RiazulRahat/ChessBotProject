@@ -187,18 +187,20 @@ bot/eval_table*.pkl
 *.pgn
 *.log
 
-# — Pygame assets —
-assets/
-
-# Ignore all Python pickle files
+# — Ignore all Python pickle files —
 *.pkl
 
 # — macOS metadata —
 .DS_Store
 **/.DS_Store
 
+# — Book library extras —
+book_library/Settings/
+
 # — Claude Code —
 CLAUDE.md
+.claude/settings.json
+.claude/settings.local.json
 
 # secrets / runtime
 training_model/config.yml

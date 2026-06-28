@@ -14,16 +14,18 @@ from bot.chess_bot import ChessBotAgent
 
 # ─── hyper‑parameters you may tweak ─────────────────────────────────────
 DEFAULT_GAMES     = 2_000
-INITIAL_EPS       = 0.05
-DECAY_EVERY       = 250
-DECAY_FACTOR      = 0.90
+INITIAL_EPS       = 0.20   # higher start → more diverse positions early on
+DECAY_EVERY       = 150    # decay more frequently
+DECAY_FACTOR      = 0.88   # steeper per-cycle decay
 LEARNING_RATE     = 0.15
-SEARCH_DEPTH      = 3
-USE_QUIESCENCE    = True
+GAMMA             = 0.99   # TD discount: earlier positions weighted less
+SEARCH_DEPTH      = 3   # UCI engine plays at depth 5; kept lower here for training speed
+USE_QUIESCENCE    = False
 QUIESCENCE_DEPTH  = 5
 SAVE_INTERVAL     = 500
 PRINT_EVERY       = 100
 TABLE_PATH        = "bot/evaluation_table_current/eval_table_zobrist_pruned.pkl"
+BOOK_PATH         = "book_library/Perfect2023.bin"
 # ────────────────────────────────────────────────────────────────────────
 
 
@@ -47,11 +49,13 @@ def main(total_games: int = DEFAULT_GAMES):
     bot_w = ChessBotAgent(exploration_rate=INITIAL_EPS, learning_rate=LEARNING_RATE,
                           save_interval=SAVE_INTERVAL, table_path=TABLE_PATH,
                           search_depth=SEARCH_DEPTH, use_quiescence=USE_QUIESCENCE,
-                          quiescence_depth=QUIESCENCE_DEPTH)
+                          quiescence_depth=QUIESCENCE_DEPTH, gamma=GAMMA,
+                          book_bin_path=BOOK_PATH)
     bot_b = ChessBotAgent(exploration_rate=INITIAL_EPS, learning_rate=LEARNING_RATE,
                           save_interval=SAVE_INTERVAL, table_path=TABLE_PATH,
                           search_depth=SEARCH_DEPTH, use_quiescence=USE_QUIESCENCE,
-                          quiescence_depth=QUIESCENCE_DEPTH)
+                          quiescence_depth=QUIESCENCE_DEPTH, gamma=GAMMA,
+                          book_bin_path=BOOK_PATH)
 
     white_wins = black_wins = draws = 0
     eps = INITIAL_EPS

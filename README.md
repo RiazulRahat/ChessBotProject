@@ -1,97 +1,205 @@
-# Neurochess Bot
+# Chess Bot
 
-> **NOTE:** This is a fork of [ChessBotProject](https://github.com/RiazulRahat/chess-bot).
-> Also Github version does not include pkl files
+A self-learning chess engine built with **TD(0) reinforcement learning** and **alpha-beta search**.
+The bot learns by playing against itself, improving its positional evaluation over time through temporal-difference updates.
 
-A modular, self-learning chess engine built with TD(0) learning, Zobrist hashing, and positional heuristics, with support for:
+---
 
-- Self-play training and Stockfish bootstrapping
-- Eval-table pruning and policy generation
-- Opening-book integration via PGN files
-- Pygame GUI for human vs. bot play
-- Elo evaluation against Stockfish
+## Architecture
 
-## Current Features
+### Core components
 
-  Key Capabilities (2025‑05)
+| File | Role |
+|---|---|
+| `bot/chess_bot.py` | `ChessBotAgent` — move selection, alpha-beta search, TD learning |
+| `bot/evaluation/positional_heuristics.py` | Piece-square table eval (standard Simplified Evaluation Function) |
+| `bot/utils/zobrist.py` | Zobrist hashing singleton — 64-bit position keys |
+| `bot/utils/opening_book.py` | FEN-dict opening book loader (PGN-sourced fallback) |
+| `bot/continuous_train.py` | Self-play training loop |
+| `chess_engine/pygame_bot_human.py` | Pygame GUI for human vs bot |
+| `training_model/run_engine.py` | UCI engine entry point (lichess-bot / any UCI GUI) |
+| `tests/evaluate_elo.py` | Elo benchmark runner vs Stockfish |
 
-- Transposition Table (TT) Cache – 64‑bit keyed, depth‑aware replacement that dramatically reduces re‑search of repeated positions.
+### How move selection works
 
-- Iterative Deepening / Alpha‑Beta Search – defaults to depth 3 (full ply) with PV‑move reordering; configurable per front‑end.
+1. **Polyglot opening book** (`book_library/Perfect2023.bin`) — weighted random book move if position is in book
+2. **FEN-dict book** (`bot/opening_book.pkl`) — fallback book from PGN files
+3. **ε-greedy exploration** — random legal move with probability ε
+4. **Alpha-beta search** — minimax with:
+   - Transposition table (depth-gated reuse)
+   - Iterative deepening with aspiration windows (`choose_move_timed`)
+   - Quiescence search (captures-only, MVV-LVA ordered)
+   - History heuristic for quiet move ordering
 
-- Quiescence Extension – capture‑only follow‑up out to 5 ply to remove horizon noise.
+### How evaluation works
 
-- TD‑Learning Evaluation – >550 k Zobrist‑keyed positions learned via self‑play + Stockfish bootstrapping.
+```
+state_value = eval_table[zobrist_key]      # TD-learned value (primary)
+            + material_weight * material   # centipawn material balance
+            + positional_weight * PST      # piece-square table bonus
+```
 
-- Positional Heuristics – piece‑square tables, pawn structure, development, king safety, mobility differential, bishop‑pair & passed‑pawn bonuses.
+### How learning works
 
-- Zobrist Pruning Tools – scripts to convert, merge and prune massive eval tables.
+After each game, TD(0) backward-pass updates every visited position:
 
-- Policy Book Generation – offline probability tables for instant move selection in known states.
+```
+new_value = old + α * (target - old)
+target    = +1.0 (White win) | -1.0 (Black win) | 0.0 (draw)
+```
 
-- Opening‑Book Support – load PGN theory lines into a lightweight opening book.
+A discount factor γ=0.99 reduces the weight of early-game positions so the bot doesn't over-index on opening moves.
 
-- Elo Evaluation Harness – automated match runner vs. Stockfish (any elo level) with CSV output.
+---
 
-- Pygame GUI – play against the engine, watch self‑play, or step through search in real‑time.
+## Installation
 
-## Installation:
+```bash
+git clone <repo_url>
+cd chess-bot
 
-- git clone <repo_url>
-- cd ChessBotProject
-- python3 -m venv .venv
-- source .venv/bin/activate
-- pip install -r requirements.txt
+python3 -m venv .venv
+source .venv/bin/activate      # Windows: .venv\Scripts\activate
 
+pip install -r requirements.txt
+```
 
-## Usage:
+**Optional — Stockfish** (only needed for Elo evaluation):
+```bash
+brew install stockfish          # macOS
+# or download from https://stockfishchess.org/download/
+```
 
-  ### Self-Play Training
+---
 
-    # Fast bulk training (no quiescence)
-    python -m bot.continuous_train
+## Quick Start
 
-    # (Optional) Enable quiescence in training
-    edit bot/continuous_train.py: use_quiescence=True
+### Play against the bot (Pygame GUI)
 
-  ### Policy Generation
+```bash
+python -m chess_engine.pygame_bot_human
+```
 
-    # After training completes:
-    python bot/build_policy.py
+Click a piece to select it, then click a destination square. The bot plays as Black by default.
 
-  ### Opening Book
+---
 
-    # Build opening_book.pkl from your PGN files:
-    python scripts/build_opening_book.py
+### Run self-play training
 
-  ### Eval-Table Conversion & Pruning
+```bash
+python -m bot.continuous_train --games 1000
+```
 
-    # Convert FEN→Zobrist:
-    python training/convert_eval_table_to_zobrist.py
+The eval table is saved every 500 games (configurable via `SAVE_INTERVAL`) and also on `Ctrl+C` interrupt.
+Progress is printed every 100 games showing W-L-D, table size, and current ε.
 
-    # Prune low-value entries:
-    python training/prune_eval_table.py
+**Training hyperparameters** (edit `bot/continuous_train.py`):
 
-  ### Elo Evaluation
+| Constant | Default | Description |
+|---|---|---|
+| `INITIAL_EPS` | `0.20` | Starting exploration rate |
+| `DECAY_EVERY` | `150` | Games between ε decay steps |
+| `DECAY_FACTOR` | `0.88` | Multiplier per decay step |
+| `GAMMA` | `0.99` | TD discount factor |
+| `SEARCH_DEPTH` | `3` | Alpha-beta depth during training |
+| `SAVE_INTERVAL` | `500` | Games between auto-saves |
 
-    # Test bot vs Stockfish (e.g. 100 games):
-    python evaluate_elo.py --games 100 --positional-weight 0.8
+---
 
-  ### Human vs Bot GUI
+### Run the UCI engine (lichess-bot / arena)
 
-    python -m chess_engine.pygame_bot_human
+```bash
+python training_model/run_engine.py
+```
 
-    Use the GUI to play against the bot with the latest trained policy and heuristics.
+This speaks UCI over stdin/stdout and learns from each completed game. Point any UCI-compatible GUI or lichess-bot at this script.
 
+The engine uses time controls when provided (`wtime`/`btime`/`winc`/`binc`) and falls back to fixed-depth search for analysis mode.
 
-## Configuration:
+---
 
-- Hyperparameters for training are in bot/continuous_train.py.
-- Heuristic weights (positional, mobility, safety) live in bot/evaluation/positional_heuristics.py.
-- Search settings (depth, quiescence, time-per-move) are in bot/chess_bot.py and pygame_bot_human.py.
-  
-Adjust these to tune difficulty or personality.
+### Evaluate Elo vs Stockfish
 
+```bash
+# Requires stockfish on PATH
+python tests/evaluate_elo.py --games 20
+```
 
+Runs the bot against Stockfish at Skill Level 0, computes an estimated Elo, and saves all games to `vs_stockfish.pgn`.
 
-Note::: Policy might not work and will be playing against a 0 knowledge bot... pkl files too large for github
+---
+
+## Configuration
+
+### Search depth
+
+- **Training** (`continuous_train.py`): `SEARCH_DEPTH = 3` — kept lower for training speed
+- **UCI engine** (`run_engine.py`): `search_depth=5`
+- **GUI** (`pygame_bot_human.py`): `search_depth=5`
+
+### Positional weights
+
+In `bot/chess_bot.py` constructor defaults:
+```python
+material_weight  = 0.15   # pawn units per unit of material imbalance
+positional_weight = 0.05  # pawn units per PST centipawn score
+```
+
+### Opening book
+
+The bot uses `book_library/Perfect2023.bin` (polyglot format) for opening moves.
+To rebuild the FEN-dict fallback from PGN files, use `bot/utils/opening_book.py`:
+
+```python
+from bot.utils.opening_book import build_opening_book, save_opening_book
+
+book = build_opening_book(["path/to/openings.pgn"], max_depth=12)
+save_opening_book(book, "bot/opening_book.pkl")
+```
+
+---
+
+## Project Structure
+
+```
+chess-bot/
+├── bot/
+│   ├── chess_bot.py               # ChessBotAgent (core)
+│   ├── continuous_train.py        # Self-play training loop
+│   ├── evaluation/
+│   │   └── positional_heuristics.py  # Piece-square tables
+│   ├── evaluation_table_current/  # Saved eval tables (pkl, gitignored)
+│   └── utils/
+│       ├── zobrist.py             # Zobrist hashing
+│       ├── opening_book.py        # Book build/load helpers
+│       └── debug.py               # Conditional debug logging
+├── chess_engine/
+│   ├── chess_engine.py            # chess.Board wrapper
+│   ├── pygame_bot_human.py        # Pygame GUI
+│   ├── pygame_chess.py            # Rendering helpers
+│   └── utils.py                   # Image scale utility
+├── book_library/
+│   └── Perfect2023.bin            # Polyglot opening book
+├── training_model/
+│   ├── run_engine.py              # UCI engine entry point
+│   └── lichess-bot/               # lichess-bot submodule
+├── tests/
+│   ├── test_engine_basics.py      # Move legality / search tests
+│   ├── test_quiescence.py         # Quiescence search tests
+│   └── evaluate_elo.py            # Stockfish Elo benchmark
+└── requirements.txt
+```
+
+> **Note:** Pickle files (`*.pkl`) are gitignored. The eval table, Zobrist keys, and opening book pkl are local only.
+> The repo includes `book_library/Perfect2023.bin` (polyglot binary, 52 KB) as the primary opening book.
+
+---
+
+## Running Tests
+
+```bash
+pytest
+```
+
+All tests are in `tests/` and cover move legality, alpha-beta search termination, and quiescence search correctness.
+The training loop and eval function are tested manually via `tests/evaluate_elo.py`.

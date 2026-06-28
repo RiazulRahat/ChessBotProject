@@ -1,4 +1,3 @@
-import os
 import pygame, chess, statistics
 from . import pygame_chess as pgc
 from bot.utils.zobrist import zobrist
@@ -41,14 +40,10 @@ def main():
     engine = ChessEngine()
 
     human_color = chess.WHITE
-    _policy_path = "bot/policy_table_v1.pkl"
-    bot   = ChessBotAgent(exploration_rate=0.0, learning_rate=0.0,
-                          save_interval=50, table_path="bot/evaluation_table_current/eval_table_zobrist_pruned.pkl",
-                          policy_path=_policy_path if os.path.exists(_policy_path) else None,
-                          policyMix=0.1,
-                          search_depth=5, mobility_weight=0.05,
-                          use_quiescence=True, quiescence_depth=5,
-                          usePolicy=os.path.exists(_policy_path))
+    bot   = ChessBotAgent(exploration_rate=0.0, learning_rate=0.15,
+                          save_interval=1, table_path="bot/evaluation_table_current/eval_table_zobrist_pruned.pkl",
+                          search_depth=5,
+                          use_quiescence=True, quiescence_depth=5)
 
     running = True
     while running:
@@ -77,9 +72,9 @@ def main():
 
         # bot move
         if engine.board.turn != human_color and not engine.board.is_game_over():
-            mv = mv = bot.choose_move_timed(engine.board, time_per_move=2.0)
+            mv = bot.choose_move_timed(engine.board, time_per_move=2.0)
             if mv:
-                game_history.append((engine.board.fen(), engine.board.turn == chess.WHITE))
+                game_history.append((zobrist.hash(engine.board), engine.board.turn == chess.WHITE, engine.board.fen()))
                 move_history.append(engine.board.san(mv))
                 engine.board.push(mv)
 
@@ -122,7 +117,7 @@ def _apply_move(engine, frm, to):
                 mv = chess.Move(from_sq, to_sq,
                                 promotion=promotion_prompt_vertical(
                                     engine.board.turn, board_coord[to], screen.copy()))
-            game_history.append((engine.board.fen(), engine.board.turn == chess.WHITE))
+            game_history.append((zobrist.hash(engine.board), engine.board.turn == chess.WHITE, engine.board.fen()))
             move_history.append(engine.board.san(mv))
             engine.board.push(mv)
             break

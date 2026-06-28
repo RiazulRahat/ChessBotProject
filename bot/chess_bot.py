@@ -5,10 +5,11 @@ import chess
 
 from bot.utils.zobrist import zobrist
 from bot.utils.opening_book import load_opening_book
+from bot.evaluation.positional_heuristics import positional_score
 import chess.polyglot
 # ────────────────────────────────────────────────────────────────────────
 TABLE_FILE = "bot/evaluation_table_current/eval_table_phaseA.pkl"
-DRAW_BIAS  = -0.30
+DRAW_BIAS  = 0.0
 INF        = float("inf")
 
 # unified piece values (centipawns)
@@ -37,9 +38,10 @@ class ChessBotAgent:
                  learning_rate=0.02,
                  save_interval=50,
                  table_path=TABLE_FILE,
-                 policy_path=None,
                  search_depth=5,
                  material_weight=0.15,
+                 positional_weight=0.05,
+                 gamma=0.99,
                  use_quiescence=False,
                  quiescence_depth=5,
                  zobrist_keys_path="bot/zobrist_keys.pkl",
@@ -51,6 +53,8 @@ class ChessBotAgent:
         self.save_interval     = save_interval
         self.search_depth      = max(1, search_depth)
         self.material_weight   = material_weight
+        self.positional_weight = positional_weight
+        self.gamma             = gamma
         self.use_quiescence    = use_quiescence
         self.quiescence_depth  = quiescence_depth
 
@@ -68,12 +72,6 @@ class ChessBotAgent:
         if os.path.exists(table_path.replace(".pkl", "_stats.pkl")):
             with open(table_path.replace(".pkl", "_stats.pkl"), "rb") as f:
                 self.zkey_stats = pickle.load(f)
-
-        self.policy: dict[int, dict[str, float]] = {}
-        if policy_path:
-            with open(policy_path, "rb") as f:
-                self.policy = pickle.load(f)
-            print(f"Loaded policy table ({len(self.policy):,})")
 
         # opening book — polyglot .bin takes priority; FEN-dict pkl is the fallback
         self._book_bin_path = book_bin_path if book_bin_path and os.path.exists(book_bin_path) else None
@@ -98,13 +96,14 @@ class ChessBotAgent:
                         len(board.pieces(p, chess.BLACK)))
                    for p, v in vals.items())
 
-    def _state_value(self, board: chess.Board) -> float:
-        key = zobrist.hash(board)
-        if key in self.evaluation_table:
-            self.zkey_to_fen.setdefault(key, board.fen())
-        mat = self._material(board)
-        base = self.evaluation_table.get(key, 0.0)
-        return base + self.material_weight * mat
+    def _state_value(self, board: chess.Board, zKey: int | None = None) -> float:
+        if zKey is None:
+            zKey = zobrist.hash(board)
+        self.zkey_to_fen.setdefault(zKey, board.fen())
+        base = self.evaluation_table.get(zKey, 0.0)
+        mat  = self._material(board)
+        pos  = positional_score(board)
+        return base + self.material_weight * mat + self.positional_weight * pos
 
 
 
@@ -264,7 +263,7 @@ class ChessBotAgent:
                 # returns a stable evaluation, than a raw evaluation score (slightly better)
                 return val, None
             # if quiescence is disabled call static evaluation
-            return self._state_value(board), None
+            return self._state_value(board, zKey), None
         # ---------------------------------------
 
         
@@ -371,7 +370,7 @@ class ChessBotAgent:
             return self.tt[zKey][1]    # return val
 
         # 'static' board state value (val)
-        static_val = self._state_value(board)
+        static_val = self._state_value(board, zKey)
         best = static_val  # stand-pat; returned when all captures are pruned
 
         # Compare static value
@@ -496,7 +495,8 @@ class ChessBotAgent:
             st["last_seen"] = datetime.datetime.utcnow().timestamp()
             self.zkey_stats[zkey] = st
 
-            next_v = new if white_move else -new
+            # gamma discounts the value passed to earlier positions
+            next_v = (new if white_move else -new) * self.gamma
 
         self.games_since_save += 1
         if self.games_since_save >= self.save_interval:
@@ -523,34 +523,7 @@ class ChessBotAgent:
             pickle.dump(self.zkey_stats, f)
         dprint("Saved table  entries=%d", len(self.evaluation_table))
 
-    # ───────── policy helpers (unchanged) ───────────────────────────────
     def board_to_zkey(self, board):      # external tool hook
         return zobrist.hash(board)
-
-    def build_policy_table(self):
-        policy = {}
-        for zkey, fen in self.zkey_to_fen.items():
-            board = chess.Board(fen)
-            counts = {}
-            for mv in board.legal_moves:
-                board.push(mv)
-                ck = zobrist.hash(board)
-                board.pop()
-                counts[mv.uci()] = self.zkey_stats.get(ck, {}).get("visits", 0)
-            total = sum(counts.values())
-            if total:
-                policy[zkey] = {u: v / total for u, v in counts.items()}
-            elif counts:
-                n = len(counts)
-                policy[zkey] = {u: 1 / n for u in counts}
-        self.policy = policy
-        return policy
-
-    def save_policy(self, path):
-        if not self.policy:
-            raise RuntimeError("Call build_policy_table() first.")
-        with open(path, "wb") as f:
-            pickle.dump(self.policy, f)
-        print(f"Policy saved → {path}")
 
 

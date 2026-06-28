@@ -23,7 +23,7 @@ TIME_PER_MOVE    = 0.200     # seconds per move
 NUM_GAMES        = 20        # total games (half as White, half as Black)
 SEARCH_DEPTH     = 3         # your bot’s search depth for testing
 EPSILON          = 0.0       # no randomness during test
-TABLE_PATH       = "bot/eval_table_zobrist_pruned.pkl"
+TABLE_PATH       = "bot/evaluation_table_current/eval_table_zobrist_pruned.pkl"
 # ────────────────────────────────────────────────────────────────────────
 
 def parse_args():
