@@ -2,7 +2,11 @@
 import pickle, time, random
 import chess
 from bot.utils.zobrist import zobrist
-from bot.evaluation.positional_heuristics import positional_score
+_MAT_VALS = {chess.PAWN: 1, chess.KNIGHT: 3, chess.BISHOP: 3, chess.ROOK: 5, chess.QUEEN: 9}
+
+def _material(board):
+    return sum(v * (len(board.pieces(p, chess.WHITE)) - len(board.pieces(p, chess.BLACK)))
+               for p, v in _MAT_VALS.items())
 
 Z_TABLE_BACKUP = "bot/evaluation_table_current/eval_table_zobrist_backup_for_fen.pkl"
 FEN_MAP_OUT    = "bot/evaluation_table_current/fen_map_partial.pkl"
@@ -21,7 +25,7 @@ def select_move_depth1(board, z_table):
     for mv in moves:
         board.push(mv)
         key = zobrist.hash(board)
-        val = z_table.get(key, positional_score(board))
+        val = z_table.get(key, _material(board))
         board.pop()
         if (maximise and val > best_val) or (not maximise and val < best_val):
             best_val, best_mv = val, mv

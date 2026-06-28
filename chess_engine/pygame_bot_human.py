@@ -1,3 +1,4 @@
+import os
 import pygame, chess, statistics
 from . import pygame_chess as pgc
 from bot.utils.zobrist import zobrist
@@ -40,11 +41,14 @@ def main():
     engine = ChessEngine()
 
     human_color = chess.WHITE
+    _policy_path = "bot/policy_table_v1.pkl"
     bot   = ChessBotAgent(exploration_rate=0.0, learning_rate=0.0,
                           save_interval=50, table_path="bot/evaluation_table_current/eval_table_zobrist_pruned.pkl",
-                          policy_path="bot/policy_table_v1.pkl", policyMix=0.1,
-                          search_depth=3, positional_weight=0.8, mobility_weight=0.05,
-                          use_quiescence=True, quiescence_depth=5, usePolicy=True)
+                          policy_path=_policy_path if os.path.exists(_policy_path) else None,
+                          policyMix=0.1,
+                          search_depth=5, mobility_weight=0.05,
+                          use_quiescence=True, quiescence_depth=5,
+                          usePolicy=os.path.exists(_policy_path))
 
     running = True
     while running:

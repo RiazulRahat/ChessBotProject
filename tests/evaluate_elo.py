@@ -21,7 +21,6 @@ if STOCKFISH_PATH is None:
 STOCKFISH_REF_ELO = 100     # assumed Elo of the Stockfish instance
 TIME_PER_MOVE    = 0.200     # seconds per move
 NUM_GAMES        = 20        # total games (half as White, half as Black)
-POS_WEIGHT       = 0.8
 SEARCH_DEPTH     = 3         # your bot’s search depth for testing
 EPSILON          = 0.0       # no randomness during test
 TABLE_PATH       = "bot/eval_table_zobrist_pruned.pkl"
@@ -29,8 +28,6 @@ TABLE_PATH       = "bot/eval_table_zobrist_pruned.pkl"
 
 def parse_args():
     p = argparse.ArgumentParser()
-    p.add_argument("--positional-weight", type=float, default=1.0,
-                   help="Multiplier for positional_score")
     p.add_argument("--games",            type=int,   default=NUM_GAMES,
                    help="Number of games to play")
     return p.parse_args()
@@ -79,7 +76,6 @@ def main():
         save_interval=NUM_GAMES,
         table_path=TABLE_PATH,
         search_depth=SEARCH_DEPTH,
-        positional_weight=args.positional_weight,
         use_quiescence=True
         )
 

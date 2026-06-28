@@ -17,16 +17,22 @@ fen_map = {}   # will collect key → fen
 FEN_MAP_OUT = os.path.join(os.path.dirname(__file__), "fen_map_live.pkl")
 # ─────────────────────────────────────────────────────────────────────────
 
+_policy_path = os.path.join(PROJECT_ROOT, "bot", "policy_table_v1.pkl")
+_table_path  = os.path.join(PROJECT_ROOT, "bot", "evaluation_table_current", "eval_table_zobrist_pruned.pkl")
+_zkeys_path  = os.path.join(PROJECT_ROOT, "bot", "zobrist_keys.pkl")
+
 agent = None
 try:
     agent = ChessBotAgent(
          exploration_rate=0.01,
-         search_depth=3,
-         usePolicy=True,
+         search_depth=5,
+         usePolicy=os.path.exists(_policy_path),
          save_interval=1,
          use_quiescence=True,
          quiescence_depth=5,
-         policy_path=os.path.join(PROJECT_ROOT, "bot", "policy_table_v1.pkl")
+         table_path=_table_path,
+         zobrist_keys_path=_zkeys_path,
+         policy_path=_policy_path if os.path.exists(_policy_path) else None,
      )
 except Exception:
     traceback.print_exc()

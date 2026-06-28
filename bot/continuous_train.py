@@ -19,7 +19,6 @@ DECAY_EVERY       = 250
 DECAY_FACTOR      = 0.90
 LEARNING_RATE     = 0.15
 MOB_WEIGHT        = 0.05
-POS_WEIGHT        = 0.65
 SEARCH_DEPTH      = 3
 USE_QUIESCENCE    = True
 QUIESCENCE_DEPTH  = 5
@@ -43,12 +42,10 @@ def main(total_games: int = DEFAULT_GAMES):
     # instantiate two identical bots
     bot_w = ChessBotAgent(INITIAL_EPS, LEARNING_RATE, MOB_WEIGHT, SAVE_INTERVAL,
                           TABLE_PATH, search_depth=SEARCH_DEPTH,
-                          positional_weight=POS_WEIGHT,
                           use_quiescence=USE_QUIESCENCE, quiescence_depth=QUIESCENCE_DEPTH,
                           usePolicy=False)
     bot_b = ChessBotAgent(INITIAL_EPS, LEARNING_RATE, MOB_WEIGHT, SAVE_INTERVAL,
                           TABLE_PATH, search_depth=SEARCH_DEPTH,
-                          positional_weight=POS_WEIGHT,
                           use_quiescence=USE_QUIESCENCE, quiescence_depth=QUIESCENCE_DEPTH,
                           usePolicy=False)
 

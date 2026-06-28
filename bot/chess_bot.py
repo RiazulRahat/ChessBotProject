@@ -5,11 +5,9 @@ import chess
 
 from bot.utils.zobrist import zobrist
 from bot.utils.opening_book import load_opening_book
-from bot.evaluation.positional_heuristics import positional_score
-
 # ────────────────────────────────────────────────────────────────────────
-TABLE_FILE = "bot/evaluation_table_current/eval_table_zobrist_pruned.pkl"
-DRAW_BIAS  = -0.15
+TABLE_FILE = "bot/evaluation_table_current/eval_table_phaseA.pkl"
+DRAW_BIAS  = -0.30
 INF        = float("inf")
 
 # unified piece values (centipawns)
@@ -41,8 +39,8 @@ class ChessBotAgent:
                  table_path=TABLE_FILE,
                  policy_path=None,
                  policyMix=0.1,
-                 search_depth=3,
-                 positional_weight=1.0,
+                 search_depth=5,
+                 material_weight=0.15,
                  usePolicy=True,
                  use_quiescence=False,
                  quiescence_depth=5,
@@ -54,7 +52,7 @@ class ChessBotAgent:
         self.mobility_weight   = mobility_weight
         self.save_interval     = save_interval
         self.search_depth      = max(1, search_depth)
-        self.positional_weight = positional_weight
+        self.material_weight   = material_weight
         self.usePolicy         = usePolicy
         self.policyMix         = policyMix
         self.use_quiescence    = use_quiescence
@@ -106,8 +104,9 @@ class ChessBotAgent:
         key = zobrist.hash(board)
         if key in self.evaluation_table:
             self.zkey_to_fen.setdefault(key, board.fen())
-        base = self.evaluation_table.get(key, self._material(board))
-        return base + self.positional_weight * positional_score(board)
+        mat = self._material(board)
+        base = self.evaluation_table.get(key, 0.0)
+        return base + self.material_weight * mat
 
 
 
@@ -347,6 +346,7 @@ class ChessBotAgent:
 
         # 'static' board state value (val)
         static_val = self._state_value(board)
+        best = static_val  # stand-pat; returned when all captures are pruned
 
         # Compare static value
         # if white's turn
@@ -359,7 +359,6 @@ class ChessBotAgent:
             if static_val <= alpha:
                 return alpha
             beta = min(beta, static_val)
-        #update max-min values
 
         # limit search depth of quiescence
         if curr_depth >= self.quiescence_depth:
@@ -370,12 +369,6 @@ class ChessBotAgent:
         # Filter: separate captures from all moves in a list
         moves = [move for move in board.legal_moves if board.is_capture(move)]
 
-        # Sort: using MVV-LVA heuristics
-        #def capture_sort(move):
-            #return (-victim_value(board, move.to_square), attacker_value(board, move.from_square))
-    
-        #moves.sort(key=capture_sort)
-    
         # One-liner sort
         moves.sort(key=lambda m: (-victim_value(board, m.to_square),
                                 attacker_value(board, m.from_square)))
@@ -384,13 +377,13 @@ class ChessBotAgent:
         for m in moves:
             # check the piece values
             gain = piece_value(board.piece_at(m.to_square))
-        
+
             # If best capture does not improve val, continue
             if maximise_white and static_val + gain < alpha:
                 continue
             if not maximise_white and static_val - gain > beta:
                 continue
-    
+
             # Push the best move into the board
             board.push(m)
 
@@ -402,22 +395,23 @@ class ChessBotAgent:
 
             # returns for cutoffs
             if maximise_white:
-                if score >= beta:
+                if score > best:
+                    best = score
+                alpha = max(alpha, score)
+                if alpha >= beta:
                     self.tt[zKey] = (-1, beta, None)
                     return beta
-                alpha = max(alpha, score)
             else:
-                if score <= alpha:
+                if score < best:
+                    best = score
+                beta = min(beta, score)
+                if beta <= alpha:
                     self.tt[zKey] = (-1, alpha, None)
                     return alpha
-                beta = min(beta, score)
 
-        # Final Quiescence score
-        result = alpha if maximise_white else beta
-        # Add to transposition table
-        self.tt[zKey] = (-1, result, None)
-    
-        return result
+        # Final Quiescence score — actual best found (fail-soft)
+        self.tt[zKey] = (-1, best, None)
+        return best
 
 
     # ───────── move ordering ────────────────────────────────────────────

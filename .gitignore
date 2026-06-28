@@ -199,3 +199,7 @@ assets/
 
 # — Claude Code —
 CLAUDE.md
+
+# secrets / runtime
+training_model/config.yml
+training_log.txt
