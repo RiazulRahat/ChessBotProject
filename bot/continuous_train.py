@@ -18,7 +18,6 @@ INITIAL_EPS       = 0.05
 DECAY_EVERY       = 250
 DECAY_FACTOR      = 0.90
 LEARNING_RATE     = 0.15
-MOB_WEIGHT        = 0.05
 SEARCH_DEPTH      = 3
 USE_QUIESCENCE    = True
 QUIESCENCE_DEPTH  = 5
@@ -30,6 +29,11 @@ TABLE_PATH        = "bot/evaluation_table_current/eval_table_zobrist_pruned.pkl"
 
 def play_one(wbot: ChessBotAgent, bbot: ChessBotAgent):
     """Return (result_str, history_list)."""
+    # Clear per-game search caches (TT and history heuristic table)
+    wbot.tt.clear(); bbot.tt.clear()
+    wbot.history = [[0]*64 for _ in range(64)]
+    bbot.history = [[0]*64 for _ in range(64)]
+
     board, hist = chess.Board(), []
     while not board.is_game_over():
         hist.append((zobrist.hash(board), board.turn == chess.WHITE, board.fen()))
@@ -40,14 +44,14 @@ def play_one(wbot: ChessBotAgent, bbot: ChessBotAgent):
 
 def main(total_games: int = DEFAULT_GAMES):
     # instantiate two identical bots
-    bot_w = ChessBotAgent(INITIAL_EPS, LEARNING_RATE, MOB_WEIGHT, SAVE_INTERVAL,
-                          TABLE_PATH, search_depth=SEARCH_DEPTH,
-                          use_quiescence=USE_QUIESCENCE, quiescence_depth=QUIESCENCE_DEPTH,
-                          usePolicy=False)
-    bot_b = ChessBotAgent(INITIAL_EPS, LEARNING_RATE, MOB_WEIGHT, SAVE_INTERVAL,
-                          TABLE_PATH, search_depth=SEARCH_DEPTH,
-                          use_quiescence=USE_QUIESCENCE, quiescence_depth=QUIESCENCE_DEPTH,
-                          usePolicy=False)
+    bot_w = ChessBotAgent(exploration_rate=INITIAL_EPS, learning_rate=LEARNING_RATE,
+                          save_interval=SAVE_INTERVAL, table_path=TABLE_PATH,
+                          search_depth=SEARCH_DEPTH, use_quiescence=USE_QUIESCENCE,
+                          quiescence_depth=QUIESCENCE_DEPTH)
+    bot_b = ChessBotAgent(exploration_rate=INITIAL_EPS, learning_rate=LEARNING_RATE,
+                          save_interval=SAVE_INTERVAL, table_path=TABLE_PATH,
+                          search_depth=SEARCH_DEPTH, use_quiescence=USE_QUIESCENCE,
+                          quiescence_depth=QUIESCENCE_DEPTH)
 
     white_wins = black_wins = draws = 0
     eps = INITIAL_EPS

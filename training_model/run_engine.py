@@ -26,7 +26,6 @@ try:
     agent = ChessBotAgent(
          exploration_rate=0.01,
          search_depth=5,
-         usePolicy=os.path.exists(_policy_path),
          save_interval=1,
          use_quiescence=True,
          quiescence_depth=5,

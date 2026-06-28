@@ -5,6 +5,7 @@ import chess
 
 from bot.utils.zobrist import zobrist
 from bot.utils.opening_book import load_opening_book
+import chess.polyglot
 # ────────────────────────────────────────────────────────────────────────
 TABLE_FILE = "bot/evaluation_table_current/eval_table_phaseA.pkl"
 DRAW_BIAS  = -0.30
@@ -34,27 +35,22 @@ class ChessBotAgent:
     def __init__(self,
                  exploration_rate=0.1,
                  learning_rate=0.02,
-                 mobility_weight=0.05,
                  save_interval=50,
                  table_path=TABLE_FILE,
                  policy_path=None,
-                 policyMix=0.1,
                  search_depth=5,
                  material_weight=0.15,
-                 usePolicy=True,
                  use_quiescence=False,
                  quiescence_depth=5,
-                 zobrist_keys_path="bot/zobrist_keys.pkl"):
+                 zobrist_keys_path="bot/zobrist_keys.pkl",
+                 book_bin_path=None):
 
         # ── knobs --
         self.exploration_rate  = exploration_rate
         self.learning_rate     = learning_rate
-        self.mobility_weight   = mobility_weight
         self.save_interval     = save_interval
         self.search_depth      = max(1, search_depth)
         self.material_weight   = material_weight
-        self.usePolicy         = usePolicy
-        self.policyMix         = policyMix
         self.use_quiescence    = use_quiescence
         self.quiescence_depth  = quiescence_depth
 
@@ -64,6 +60,7 @@ class ChessBotAgent:
         self.zkey_to_fen      = {}
         self.zkey_stats       = {}
         self.tt               = {}   # key → (depth, value, bestMove)
+        self.history          = [[0]*64 for _ in range(64)]  # [from_sq][to_sq]
 
         if os.path.exists(table_path.replace(".pkl", "_zkey2fen.pkl")):
             with open(table_path.replace(".pkl", "_zkey2fen.pkl"), "rb") as f:
@@ -78,7 +75,8 @@ class ChessBotAgent:
                 self.policy = pickle.load(f)
             print(f"Loaded policy table ({len(self.policy):,})")
 
-        # opening book
+        # opening book — polyglot .bin takes priority; FEN-dict pkl is the fallback
+        self._book_bin_path = book_bin_path if book_bin_path and os.path.exists(book_bin_path) else None
         book_path = os.path.join(os.path.dirname(__file__), "opening_book.pkl")
         self.opening_book = load_opening_book(book_path)
 
@@ -130,20 +128,18 @@ class ChessBotAgent:
         zKey = zobrist.hash(board)
 
         # 0) Opening Book Fall-Through ----------
-        if fen in self.opening_book:
-            # Choose a random move from Moves (FEN->Moves)
-            move = chess.Move.from_uci(random.choice(self.opening_book[fen]))
-            # Choose the best move [0] from Opening book (Uncomment line below and comment above)
-            #move = chess.Move.from_uci(self.opening_book[fen][0])
-            return move
+        # Try polyglot .bin book first (weighted random choice among book moves)
+        if self._book_bin_path:
+            try:
+                with chess.polyglot.open_reader(self._book_bin_path) as reader:
+                    entry = reader.weighted_choice(board)
+                    return entry.move
+            except IndexError:
+                pass  # position not in polyglot book; fall through to FEN-dict
 
-        # 1) Learned Policy Fall-Through --------
-        if self.usePolicy and zKey in self.policy and random.random() < self.policyMix: # Use policy - active AND board state in policy AND probability
-            # policy[key]-> Values -> moves - list of UCI, probs - list of Probabilities: π(s)
-            moves, probs = zip(*self.policy[zKey].items())
-            # Pick random element (UCI_move) from moves, using weights in probs
-            mv = chess.Move.from_uci(random.choices(moves, probs)[0])
-            return mv
+        if fen in self.opening_book:
+            move = chess.Move.from_uci(random.choice(self.opening_book[fen]))
+            return move
 
         # Check if there is any legal moves OR if no legal moves(eg Game Over) return None
         legal = list(board.legal_moves)
@@ -172,14 +168,32 @@ class ChessBotAgent:
 
     def choose_move_timed(self, board: chess.Board, time_per_move: float):
         start = time.time()
+        maximise = board.turn == chess.WHITE
         best = random.choice(list(board.legal_moves))
-        for depth in range(1, self.search_depth + 1):
-            val, mv = self._alphabeta(board, depth, -INF, INF,
-                                      board.turn == chess.WHITE)
-            if mv:
-                best = mv
+        DELTA = 0.20  # ~1 pawn in this engine's evaluation scale
+
+        # Depth 1: full window to get an initial score
+        val, mv = self._alphabeta(board, 1, -INF, INF, maximise)
+        if mv:
+            best = mv
+
+        for depth in range(2, self.search_depth + 1):
             if time.time() - start >= time_per_move:
                 break
+            lo, hi = val - DELTA, val + DELTA
+            result_val, result_mv = self._alphabeta(board, depth, lo, hi, maximise)
+
+            # Fail-low: widen downward and re-search
+            if result_val <= lo:
+                result_val, result_mv = self._alphabeta(board, depth, -INF, hi, maximise)
+            # Fail-high: widen upward and re-search
+            elif result_val >= hi:
+                result_val, result_mv = self._alphabeta(board, depth, lo, INF, maximise)
+
+            if result_mv:
+                best = result_mv
+            val = result_val
+
         return best
 
 
@@ -214,13 +228,13 @@ class ChessBotAgent:
         zKey = zobrist.hash(board)
 
         
-        # 1) No more legal moves --------------
+        # 1) Terminal state ----------------------
         if board.is_game_over():
-            # Expected: Checkmate -> large +ve/-ve score
-            #           Draw      -> neutral score
-            # returns (value, None)
-            return self._state_value(board), None # None because no 'best move' from ended game
-        # -------------------------------------
+            if board.is_checkmate():
+                # board.turn is the side that is checkmated (can't move, in check)
+                return (-INF if board.turn == chess.WHITE else INF), None
+            return DRAW_BIAS, None  # stalemate / repetition / 50-move / material
+        # ----------------------------------------
 
         
         # 2) Look-up Transposition-Table ------
@@ -265,9 +279,14 @@ class ChessBotAgent:
         for mv in self._ordered_moves(board):
             # apply move to board - for recursion only
             board.push(mv)
-            # recursive call - (depth-1) - flip maximise_white because turn changes
-            val, _ = self._alphabeta(board, depth - 1,
-                                alpha, beta, not maximise_white)
+            # short-circuit: if this move immediately creates a claimable draw, penalise it
+            # without recursing (prevents the bot from walking into repetition)
+            if board.can_claim_draw():
+                val = DRAW_BIAS
+            else:
+                # recursive call - (depth-1) - flip maximise_white because turn changes
+                val, _ = self._alphabeta(board, depth - 1,
+                                    alpha, beta, not maximise_white)
             # revert board
             board.pop()
 
@@ -279,7 +298,8 @@ class ChessBotAgent:
                     alpha, best_move = val, mv
                 # β‑cutoff: Black will avoid this position
                 if alpha >= beta:
-                    # no more search necessary because rest is avoided
+                    if not board.is_capture(mv):
+                        self.history[mv.from_square][mv.to_square] += depth * depth
                     break
             # Black's turn (Minimizer)
             else:
@@ -289,7 +309,8 @@ class ChessBotAgent:
                     beta, best_move = val, mv
                 # α-cutoff: White will avoid this position
                 if beta <= alpha:
-                    # no more search necessary
+                    if not board.is_capture(mv):
+                        self.history[mv.from_square][mv.to_square] += depth * depth
                     break
 
         
@@ -340,6 +361,11 @@ class ChessBotAgent:
         # Store the zobrist value of board object
         zKey = zobrist.hash(board)
 
+        if board.is_game_over():
+            if board.is_checkmate():
+                return -INF if board.turn == chess.WHITE else INF
+            return DRAW_BIAS
+
         # If key is in transposition table and previous quiescence search was done [-1]
         if zKey in self.tt and self.tt[zKey][0] == -1:
             return self.tt[zKey][1]    # return val
@@ -387,9 +413,12 @@ class ChessBotAgent:
             # Push the best move into the board
             board.push(m)
 
-            # Recursion - same alpha beta bounds, flip turn, increase depth by 1
-            score = self.quiesce(board, alpha, beta,
-                                not maximise_white, curr_depth + 1)
+            if board.can_claim_draw():
+                score = DRAW_BIAS
+            else:
+                # Recursion - same alpha beta bounds, flip turn, increase depth by 1
+                score = self.quiesce(board, alpha, beta,
+                                    not maximise_white, curr_depth + 1)
             # Pop to restore position
             board.pop()
 
@@ -446,8 +475,8 @@ class ChessBotAgent:
 
         # sort by the mvv_lva value - explored first
         caps.sort(key=mvv_lva)
-        # sort alphabetically by UCI string
-        quiet.sort(key=lambda move: move.uci())
+        # sort by history heuristic score (higher = tried more cutoffs)
+        quiet.sort(key=lambda m: self.history[m.from_square][m.to_square], reverse=True)
         # Concatenate in order
         return caps + checks + quiet
 
