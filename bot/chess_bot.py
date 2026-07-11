@@ -508,15 +508,20 @@ class ChessBotAgent:
                 print("⚠️  could not load eval table:", e)
         return {}
 
+    def _atomic_dump(self, obj, path):
+        tmp = path + ".tmp"
+        with open(tmp, "wb") as f:
+            pickle.dump(obj, f)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, path) 
+
     def _save_table(self):
         os.makedirs(os.path.dirname(self._table_path), exist_ok=True)
-        with open(self._table_path, "wb") as f:
-            pickle.dump(self.evaluation_table, f)
-        with open(self._table_path.replace(".pkl", "_zkey2fen.pkl"), "wb") as f:
-            pickle.dump(self.zkey_to_fen, f)
-        with open(self._table_path.replace(".pkl", "_stats.pkl"), "wb") as f:
-            pickle.dump(self.zkey_stats, f)
-        dprint("Saved table  entries=%d", len(self.evaluation_table))
+        self._atomic_dump(self.evaluation_table, self._table_path)
+        self._atomic_dump(self.zkey_to_fen, self._table_path.replace(".pkl", "_zkey2fen.pkl"))
+        self._atomic_dump(self.zkey_stats, self._table_path.replace(".pkl", "_stats.pkl"))
+        dprint("Saved table entries=%d", len(self.evaluation_table))
 
     def board_to_zkey(self, board):      # external tool hook
         return zobrist.hash(board)

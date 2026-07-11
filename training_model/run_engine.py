@@ -21,7 +21,7 @@ try:
     agent = ChessBotAgent(
         exploration_rate=0.01,
         search_depth=5,
-        save_interval=1,
+        save_interval=10**9,
         use_quiescence=True,
         quiescence_depth=5,
         table_path=_table_path,
@@ -111,7 +111,6 @@ if __name__ == "__main__":
 
                 if board.is_game_over():
                     agent.update_evaluation(game_history, board.result())
-                    agent._save_table()
                     game_history.clear()
 
             elif cmd == "stop":
