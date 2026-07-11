@@ -44,7 +44,6 @@ class ChessBotAgent:
                  gamma=0.99,
                  use_quiescence=False,
                  quiescence_depth=5,
-                 zobrist_keys_path="bot/zobrist_keys.pkl",
                  book_bin_path=None):
 
         # ── knobs --
@@ -77,10 +76,6 @@ class ChessBotAgent:
         self._book_bin_path = book_bin_path if book_bin_path and os.path.exists(book_bin_path) else None
         book_path = os.path.join(os.path.dirname(__file__), "opening_book.pkl")
         self.opening_book = load_opening_book(book_path)
-
-        # keep key array around for external tools
-        with open(zobrist_keys_path, "rb") as f:
-            self.zobrist_keys = pickle.load(f)
 
         self.games_since_save = 0
         self.quiesce_calls    = 0

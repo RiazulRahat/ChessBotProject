@@ -14,7 +14,6 @@ fen_map = {}
 FEN_MAP_OUT = os.path.join(os.path.dirname(__file__), "fen_map_live.pkl")
 
 _table_path = os.path.join(PROJECT_ROOT, "bot", "evaluation_table_current", "eval_table_zobrist_pruned.pkl")
-_zkeys_path = os.path.join(PROJECT_ROOT, "bot", "zobrist_keys.pkl")
 _book_path  = os.path.join(PROJECT_ROOT, "book_library", "Perfect2023.bin")
 
 agent = None
@@ -26,7 +25,6 @@ try:
         use_quiescence=True,
         quiescence_depth=5,
         table_path=_table_path,
-        zobrist_keys_path=_zkeys_path,
         book_bin_path=_book_path,
     )
 except Exception:
