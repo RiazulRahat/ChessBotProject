@@ -3,7 +3,7 @@ services:
   bot:
     build: .
     image: chessbot:latest
-    container-name: bot
+    container_name: bot
     working_dir: /app/training_model/lichess-bot
     command: ["python3", "lichess-bot.py", "--config", "/app/training_model/config.yml"]
     volumes:
@@ -17,7 +17,7 @@ services:
   
   trainer:
     image: chessbot:latest
-    container-name: trainer
+    container_name: trainer
     depends_on: [bot]
     working_dir: /app
     command: ["python3", "-m", "bot.continuous_train", "--games", "100000"]
