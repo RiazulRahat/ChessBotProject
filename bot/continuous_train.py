@@ -15,11 +15,11 @@ from bot.chess_bot import ChessBotAgent
 # ─── hyper‑parameters you may tweak ─────────────────────────────────────
 DEFAULT_GAMES     = 2_000
 INITIAL_EPS       = 0.20   # higher start → more diverse positions early on
-DECAY_EVERY       = 150    # decay more frequently
+DECAY_EVERY       = 200    # decay more frequently
 DECAY_FACTOR      = 0.88   # steeper per-cycle decay
 LEARNING_RATE     = 0.15
 GAMMA             = 0.99   # TD discount: earlier positions weighted less
-SEARCH_DEPTH      = 3   # UCI engine plays at depth 5; kept lower here for training speed
+SEARCH_DEPTH      = 2   # UCI engine plays at depth 5; kept lower here for training speed
 USE_QUIESCENCE    = False
 QUIESCENCE_DEPTH  = 5
 SAVE_INTERVAL     = 500

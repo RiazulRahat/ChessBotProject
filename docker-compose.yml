@@ -1,0 +1,35 @@
+services:
+
+  bot:
+    build: .
+    image: chessbot:latest
+    container-name: bot
+    working_dir: /app/training_model/lichess-bot
+    command: ["python3", "lichess-bot.py", "--config", "/app/training_model/config.yml"]
+    volumes:
+      - botdata:/data
+      - ./training_model/config.yml:/app/training_model/config.yml:ro
+    environment:
+      - PYTHONLOGLEVEL=INFO
+    mem_limit: 350m
+    cpus: "2.0"
+    restart: unless-stopped
+  
+  trainer:
+    image: chessbot:latest
+    container-name: trainer
+    depends_on: [bot]
+    working_dir: /app
+    command: ["python3", "-m", "bot.continuous_train", "--games", "100000"]
+    volumes:
+      - botdata:/data
+    environment:
+      - PYTHONLOGLEVEL=INFO
+    mem_limit: 500m
+    cpus: "0.15"
+    stop_signal: SIGINT
+    stop_grace_period: 60s
+    restart: unless-stopped
+
+volumes:
+  botdata:

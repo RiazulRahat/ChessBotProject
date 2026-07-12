@@ -1,0 +1,16 @@
+FROM python:3.12-slim
+
+WORKDIR /app
+
+# Dependencies
+COPY requirements.txt ./requirements.txt
+COPY training_model/lichess-bot/requirements.txt ./lb-requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt -r lb-requirements.txt
+
+# Code
+COPY . /app
+
+# Path Bridge
+COPY entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+ENTRYPOINT ["/entrypoint.sh"]
