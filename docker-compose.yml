@@ -11,6 +11,7 @@ services:
       - ./training_model/config.yml:/app/training_model/config.yml:ro
     environment:
       - PYTHONLOGLEVEL=INFO
+      - PYTHONUNBUFFERED=1
     mem_limit: 350m
     cpus: "2.0"
     restart: unless-stopped
@@ -25,6 +26,7 @@ services:
       - botdata:/data
     environment:
       - PYTHONLOGLEVEL=INFO
+      - PYTHONUNBUFFERED=1
     mem_limit: 500m
     cpus: "0.15"
     stop_signal: SIGINT
