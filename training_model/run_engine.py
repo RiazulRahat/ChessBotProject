@@ -99,10 +99,14 @@ if __name__ == "__main__":
                 our_ms  = wtime if board.turn == chess.WHITE else btime
                 our_inc = (winc if board.turn == chess.WHITE else binc) or 0
                 if our_ms is not None:
-                    budget = (our_ms / 1000) / 40 + our_inc / 1000
+                    # keep a reserve
+                    # ~200ms for move transmission and network overhead
+                    safe_ms = max(our_ms - 500, 0)
+                    budget = (safe_ms / 1000) / 30 + (our_inc / 1000) * 0.8
+                    budget = max(0.05, min(budget, safe_ms / 1000))
                     move = agent.choose_move_timed(board, budget)
                 else:
-                    move = agent.choose_move(board)
+                    move = agent.choose_move_timed(board, 3.0)
 
                 best_move = move
                 print(f"bestmove {move.uci()}", flush=True)

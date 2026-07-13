@@ -115,6 +115,7 @@ class ChessBotAgent:
         Return: chess.Move class or None
 
         """
+        self._deadline = None   # fixed-depth search: no time limit
         
         # save fen of parameter - board object
         fen = board.fen()
@@ -162,6 +163,7 @@ class ChessBotAgent:
 
     def choose_move_timed(self, board: chess.Board, time_per_move: float):
         start = time.time()
+        self._deadline = start + time_per_move   # hard stop the search
         maximise = board.turn == chess.WHITE
         best = random.choice(list(board.legal_moves))
         DELTA = 0.20  # ~1 pawn in this engine's evaluation scale
@@ -172,21 +174,25 @@ class ChessBotAgent:
             best = mv
 
         for depth in range(2, self.search_depth + 1):
-            if time.time() - start >= time_per_move:
+            if time.time() - start >= time_per_move * 0.5:
                 break
-            lo, hi = val - DELTA, val + DELTA
-            result_val, result_mv = self._alphabeta(board, depth, lo, hi, maximise)
+            # To return best move so far
+            try:
+                lo, hi = val - DELTA, val + DELTA
+                result_val, result_mv = self._alphabeta(board, depth, lo, hi, maximise)
 
-            # Fail-low: widen downward and re-search
-            if result_val <= lo:
-                result_val, result_mv = self._alphabeta(board, depth, -INF, hi, maximise)
-            # Fail-high: widen upward and re-search
-            elif result_val >= hi:
-                result_val, result_mv = self._alphabeta(board, depth, lo, INF, maximise)
+                # Fail-low: widen downward and re-search
+                if result_val <= lo:
+                    result_val, result_mv = self._alphabeta(board, depth, -INF, hi, maximise)
+                # Fail-high: widen upward and re-search
+                elif result_val >= hi:
+                    result_val, result_mv = self._alphabeta(board, depth, lo, INF, maximise)
 
-            if result_mv:
-                best = result_mv
-            val = result_val
+                if result_mv:
+                    best = result_mv
+                val = result_val
+            except TimeoutError:
+                break
 
         return best
 
@@ -221,6 +227,9 @@ class ChessBotAgent:
         # save zobrist hash of parameter - board object
         zKey = zobrist.hash(board)
 
+        # 0) Time guard — abort deep searches that overrun the move budget
+        if getattr(self, "_deadline", None) and time.time() >= self._deadline:
+            raise TimeoutError
         
         # 1) Terminal state ----------------------
         if board.is_game_over():
