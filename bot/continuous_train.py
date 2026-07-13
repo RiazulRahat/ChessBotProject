@@ -24,6 +24,9 @@ USE_QUIESCENCE    = False
 QUIESCENCE_DEPTH  = 5
 SAVE_INTERVAL     = 50
 PRINT_EVERY       = 100
+PRUNE_EVERY       = 2_000  # games between auto-prunes (0 = never)
+MIN_VISITS        = 2      # keep entries seen >= this many times
+MAX_ENTRIES       = 180_000  # hard ceiling
 TABLE_PATH        = "bot/evaluation_table_current/eval_table_zobrist_pruned.pkl"
 BOOK_PATH         = "book_library/Perfect2023.bin"
 # ────────────────────────────────────────────────────────────────────────
@@ -43,6 +46,34 @@ def play_one(wbot: ChessBotAgent, bbot: ChessBotAgent):
         board.push(mv)
     return board.result(), hist
 
+def prune_table(agent, min_visits=MIN_VISITS, max_entries=MAX_ENTRIES):
+    """Drop low-signal entries: rarely-visited AND near-zero value.
+    Shrinks the in-memory table so both trainer and engine fit in RAM."""
+
+    table, stats = agent.evaluation_table, agent.zkey_stats
+    before = len(table)
+    if before == 0:
+        return
+
+    # keep: visited enough, OR holding a non-zero value
+    keep = {k for k, s in stats.items() if s.get("visits", 0) >= min_visits}
+    keep |= {k for k, v in table.items() if abs(v) > 0.05}
+
+    # if still over the ceiling, raise the visit bar until we fit
+    bar = min_visits
+    while len(keep) > max_entries and bar < 50:
+        bar += 1
+        keep = {k for k, s in stats.items() if s.get("visits", 0) >= bar}
+        keep |= {k for k, v in table.items() if abs(v) > 0.05}
+
+    # rebuild all three structures in place (shared dicts, so bot_b sees it too)
+    agent.evaluation_table = {k: table[k] for k in keep if k in table}
+    agent.zkey_to_fen = {k: agent.zkey_to_fen[k]
+                         for k in keep if k in agent.zkey_to_fen}
+    agent.zkey_stats = {k: stats[k] for k in keep if k in stats}
+    print(f"[prune] {before:,} → {len(agent.evaluation_table):,} "
+          f"entries (visit bar {bar})")
+
 
 def main(total_games: int = DEFAULT_GAMES):
     # instantiate two identical bots
@@ -57,6 +88,13 @@ def main(total_games: int = DEFAULT_GAMES):
                           quiescence_depth=QUIESCENCE_DEPTH, gamma=GAMMA,
                           book_bin_path=BOOK_PATH)
 
+    bot_b.evaluation_table = bot_w.evaluation_table
+    bot_b.zkey_to_fen      = bot_w.zkey_to_fen
+    bot_b.zkey_stats       = bot_w.zkey_stats
+
+    # prune once at startup
+    prune_table(bot_w)
+    # re-point
     bot_b.evaluation_table = bot_w.evaluation_table
     bot_b.zkey_to_fen      = bot_w.zkey_to_fen
     bot_b.zkey_stats       = bot_w.zkey_stats
@@ -103,6 +141,14 @@ def main(total_games: int = DEFAULT_GAMES):
                 eps *= DECAY_FACTOR
                 bot_w.exploration_rate = bot_b.exploration_rate = eps
                 print(f"--- decayed ε → {eps:.3f} at game {g:,} ---")
+
+            # periodic auto-prune
+            if PRUNE_EVERY and g % PRUNE_EVERY == 0:
+                prune_table(bot_w)
+                bot_b.evaluation_table = bot_w.evaluation_table
+                bot_b.zkey_to_fen      = bot_w.zkey_to_fen
+                bot_b.zkey_stats       = bot_w.zkey_stats
+                bot_w._save_table()   # persist the smaller table
 
     except KeyboardInterrupt:
         print("Interrupted – saving …")
