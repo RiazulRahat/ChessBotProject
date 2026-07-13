@@ -44,7 +44,8 @@ class ChessBotAgent:
                  gamma=0.99,
                  use_quiescence=False,
                  quiescence_depth=5,
-                 book_bin_path=None):
+                 book_bin_path=None,
+                track_fens=True):
 
         # ── knobs --
         self.exploration_rate  = exploration_rate
@@ -56,6 +57,7 @@ class ChessBotAgent:
         self.gamma             = gamma
         self.use_quiescence    = use_quiescence
         self.quiescence_depth  = quiescence_depth
+        self.track_fens        = track_fens
 
         # ── persistent tables --
         self._table_path      = table_path
@@ -65,7 +67,7 @@ class ChessBotAgent:
         self.tt               = {}   # key → (depth, value, bestMove)
         self.history          = [[0]*64 for _ in range(64)]  # [from_sq][to_sq]
 
-        if os.path.exists(table_path.replace(".pkl", "_zkey2fen.pkl")):
+        if self.track_fens and os.path.exists(table_path.replace(".pkl", "_zkey2fen.pkl")):
             with open(table_path.replace(".pkl", "_zkey2fen.pkl"), "rb") as f:
                 self.zkey_to_fen = pickle.load(f)
         if os.path.exists(table_path.replace(".pkl", "_stats.pkl")):
@@ -94,7 +96,8 @@ class ChessBotAgent:
     def _state_value(self, board: chess.Board, zKey: int | None = None) -> float:
         if zKey is None:
             zKey = zobrist.hash(board)
-        self.zkey_to_fen.setdefault(zKey, board.fen())
+        if self.track_fens:
+            self.zkey_to_fen.setdefault(zKey, board.fen())
         base = self.evaluation_table.get(zKey, 0.0)
         mat  = self._material(board)
         pos  = positional_score(board)
@@ -493,7 +496,8 @@ class ChessBotAgent:
             new = old + self.learning_rate * (target - old)
             self.evaluation_table[zkey] = new
 
-            self.zkey_to_fen.setdefault(zkey, fen)
+            if self.track_fens:
+                self.zkey_to_fen.setdefault(zkey, fen)
             st = self.zkey_stats.get(zkey, {"visits": 0, "last_seen": None})
             st["visits"] += 1
             st["last_seen"] = datetime.datetime.utcnow().timestamp()
@@ -528,7 +532,8 @@ class ChessBotAgent:
     def _save_table(self):
         os.makedirs(os.path.dirname(self._table_path), exist_ok=True)
         self._atomic_dump(self.evaluation_table, self._table_path)
-        self._atomic_dump(self.zkey_to_fen, self._table_path.replace(".pkl", "_zkey2fen.pkl"))
+        if self.track_fens:
+            self._atomic_dump(self.zkey_to_fen, self._table_path.replace(".pkl", "_zkey2fen.pkl"))
         self._atomic_dump(self.zkey_stats, self._table_path.replace(".pkl", "_stats.pkl"))
         dprint("Saved table entries=%d", len(self.evaluation_table))
 

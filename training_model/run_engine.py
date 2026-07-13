@@ -26,6 +26,7 @@ try:
         quiescence_depth=5,
         table_path=_table_path,
         book_bin_path=_book_path,
+        track_fens=False
     )
 except Exception:
     traceback.print_exc()
