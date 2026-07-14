@@ -100,11 +100,13 @@ if __name__ == "__main__":
                 our_ms  = wtime if board.turn == chess.WHITE else btime
                 our_inc = (winc if board.turn == chess.WHITE else binc) or 0
                 if our_ms is not None:
-                    # keep a reserve
-                    # ~200ms for move transmission and network overhead
-                    safe_ms = max(our_ms - 500, 0)
+                    # Reserve enough for the us-east-1 → Lichess round-trip.
+                    # Empirically ~250ms each way from Virginia; 1000ms is safe.
+                    safe_ms = max(our_ms - 1000, 0)
                     budget = (safe_ms / 1000) / 30 + (our_inc / 1000) * 0.8
-                    budget = max(0.05, min(budget, safe_ms / 1000))
+                    # Never spend more than ~40% of remaining time on one move,
+                    # and never less than a token amount when nearly flagging.
+                    budget = max(0.05, min(budget, safe_ms / 1000 * 0.4))
                     move = agent.choose_move_timed(board, budget)
                 else:
                     move = agent.choose_move_timed(board, 3.0)

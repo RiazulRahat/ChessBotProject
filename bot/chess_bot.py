@@ -177,7 +177,7 @@ class ChessBotAgent:
             best = mv
 
         for depth in range(2, self.search_depth + 1):
-            if time.time() - start >= time_per_move * 0.5:
+            if time.time() - start >= time_per_move * 0.35:
                 break
             # To return best move so far
             try:
