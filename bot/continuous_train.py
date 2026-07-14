@@ -81,12 +81,12 @@ def main(total_games: int = DEFAULT_GAMES):
                           save_interval=SAVE_INTERVAL, table_path=TABLE_PATH,
                           search_depth=SEARCH_DEPTH, use_quiescence=USE_QUIESCENCE,
                           quiescence_depth=QUIESCENCE_DEPTH, gamma=GAMMA,
-                          book_bin_path=BOOK_PATH)
+                          book_bin_path=BOOK_PATH, track_fens=False)
     bot_b = ChessBotAgent(exploration_rate=INITIAL_EPS, learning_rate=LEARNING_RATE,
                           save_interval=10**9, table_path=TABLE_PATH,
                           search_depth=SEARCH_DEPTH, use_quiescence=USE_QUIESCENCE,
                           quiescence_depth=QUIESCENCE_DEPTH, gamma=GAMMA,
-                          book_bin_path=BOOK_PATH)
+                          book_bin_path=BOOK_PATH, track_fens=False)
 
     bot_b.evaluation_table = bot_w.evaluation_table
     bot_b.zkey_to_fen      = bot_w.zkey_to_fen
