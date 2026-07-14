@@ -12,7 +12,7 @@ services:
     environment:
       - PYTHONLOGLEVEL=INFO
       - PYTHONUNBUFFERED=1
-    mem_limit: 350m
+    mem_limit: 500m
     cpus: "2.0"
     restart: unless-stopped
   
