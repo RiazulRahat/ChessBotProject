@@ -17,7 +17,7 @@ if DEBUG:
         level   = logging.DEBUG,
         format  = "[%(asctime)s] %(message)s",
         datefmt = "%H:%M:%S",
-        stream  = sys.stdout,
+        stream  = sys.stderr,
     )
 
 def dprint(msg: str, *args, lvl: int = 2):

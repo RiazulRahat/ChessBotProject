@@ -1,6 +1,6 @@
 # Chess Bot
 
-A self-learning chess engine built with **TD(0) reinforcement learning** and **alpha-beta search**.
+A self-learning chess engine built with **TD(λ) reinforcement learning** and **alpha-beta search**.
 The bot learns by playing against itself, improving its positional evaluation over time through
 temporal-difference updates — and it runs **continuously on AWS**, playing the public on Lichess
 24/7 while training in the background.
@@ -25,13 +25,13 @@ around the clock **while simultaneously training and improving its own evaluatio
 │  plays humans/bots 24/7 │        │  depth-limited search   │
 │  reads eval table       │        │  sole writer of table   │
 └───────────┬─────────────┘        └───────────┬─────────────┘
-            │ reads                             │ writes
-            └───────────────┬───────────────────┘
+            │ reads                            │ writes
+            └───────────────┬──────────────────┘
                             ▼
               ┌───────────────────────────────┐
-              │  shared Docker volume  /data   │
-              │  eval table · zobrist keys ·   │
-              │  game PGNs · dated snapshots   │
+              │  shared Docker volume  /data  │
+              │  eval table · zobrist keys ·  │
+              │  game PGNs · dated snapshots  │
               └───────────────────────────────┘
 ```
 
@@ -41,6 +41,7 @@ around the clock **while simultaneously training and improving its own evaluatio
 - **Single-writer policy** — the trainer owns the eval table; the live bot reads it, avoiding lost-update races on the shared volume
 - **Per-game continuous weight pickup** — the bridge spawns a fresh engine process per game, so newly-trained weights go live with zero downtime and no restarts
 - **CPU-credit-aware budgeting** — the trainer is capped (`cpus`, `mem_limit`) so burstable-instance credits never starve the public-facing bot
+- **Bounded eval table** — the trainer prunes every `PRUNE_EVERY` games, capping the table at `MAX_ENTRIES` while protecting endgame and decisive-value positions, so RAM stays flat over million-game runs on the micro instance
 - **Graceful shutdown** — `stop_signal: SIGINT` triggers the trainer's save-on-exit, so `docker compose down` never discards in-progress learning
 - **Automated daily S3 backups** — dated snapshots pairing the eval table with the Zobrist keys that make it meaningful, plus every archived game PGN
 - **CloudWatch monitoring & alerts** — instance health and CPU-credit alarms via SNS email
@@ -81,21 +82,26 @@ around the clock **while simultaneously training and improving its own evaluatio
 
 ```
 state_value = eval_table[zobrist_key]      # TD-learned value (primary)
-            + material_weight * material   # centipawn material balance
-            + positional_weight * PST      # piece-square table bonus
+            + material_weight * material   # material balance (pawn units)
+            + positional_weight * PST      # piece-square table score (pawn units)
 ```
 
 ### How learning works
 
-After each game, a TD(0) backward pass updates every visited position:
+Learning is **TD(λ) with λ = 1.0**, which reduces to **Monte-Carlo returns**. After each game a
+backpropagation updates every visited position toward the discounted final result:
 
 ```
-new_value = old + α * (target - old)
-target    = +1.0 (White win) | -1.0 (Black win) | 0.0 (draw)
+final_reward = +1.0 (White win) | -1.0 (Black win) | 0.0 (draw)
+
+target    = final_reward                          # terminal position
+          = γ * ((1 - λ) * V(next) + λ * G(next)) # earlier positions
+new_value = old_value + α * (target - old_value)
 ```
 
-A discount factor **γ = 0.99** reduces the weight of early-game positions so the bot doesn't
-over-index on opening moves.
+With **λ = 1.0** the target is just the discounted final reward carried back through the game.
+The discount **γ = 0.99** shrinks the signal for early-game positions so the bot doesn't
+over-index on opening moves; the learning rate is **α = 0.15**.
 
 ---
 
@@ -139,7 +145,7 @@ Click a piece to select it, then click a destination square. The bot plays as Bl
 python -m bot.continuous_train --games 1000
 ```
 
-The eval table is saved every 500 games (configurable via `SAVE_INTERVAL`) and also on `Ctrl+C`
+The eval table is saved every 50 games (configurable via `SAVE_INTERVAL`) and also on `Ctrl+C`
 interrupt. Progress is printed every 100 games showing W-L-D, table size, and current ε.
 
 **Training hyperparameters** (edit `bot/continuous_train.py`):
@@ -147,11 +153,15 @@ interrupt. Progress is printed every 100 games showing W-L-D, table size, and cu
 | Constant | Default | Description |
 |---|---|---|
 | `INITIAL_EPS` | `0.20` | Starting exploration rate |
-| `DECAY_EVERY` | `150` | Games between ε decay steps |
+| `EPS_FLOOR` | `0.03` | Minimum exploration rate |
+| `DECAY_EVERY` | `200` | Games between ε decay steps |
 | `DECAY_FACTOR` | `0.88` | Multiplier per decay step |
-| `GAMMA` | `0.99` | TD discount factor |
-| `SEARCH_DEPTH` | `3` | Alpha-beta depth during training |
-| `SAVE_INTERVAL` | `500` | Games between auto-saves |
+| `LEARNING_RATE` | `0.15` | TD step size (α) |
+| `GAMMA` | `0.99` | TD discount factor (γ) |
+| `SEARCH_DEPTH` | `2` | Alpha-beta depth during training |
+| `SAVE_INTERVAL` | `50` | Games between auto-saves |
+| `PRUNE_EVERY` | `2000` | Games between eval-table prunes |
+| `MAX_ENTRIES` | `180000` | Eval-table size cap |
 
 ### Run the UCI engine (lichess-bot / arena)
 
@@ -159,9 +169,10 @@ interrupt. Progress is printed every 100 games showing W-L-D, table size, and cu
 python training_model/run_engine.py
 ```
 
-This speaks UCI over stdin/stdout and learns from each completed game. Point any UCI-compatible
-GUI or lichess-bot at this script. The engine uses time controls when provided
-(`wtime`/`btime`/`winc`/`binc`) and falls back to fixed-depth search for analysis mode.
+This speaks UCI over stdin/stdout, playing from the trainer-maintained evaluation table — the
+live engine reads the table but never writes it (the trainer is the sole writer). Point any
+UCI-compatible GUI or lichess-bot at this script. It uses the clock when provided
+(`wtime`/`btime`/`winc`/`binc`) and falls back to a fixed ~3-second think time otherwise.
 
 ### Run the full deployed stack locally (Docker)
 
@@ -187,7 +198,7 @@ to `vs_stockfish.pgn`.
 
 ### Search depth
 
-- **Training** (`continuous_train.py`): `SEARCH_DEPTH = 3` — kept lower for training speed
+- **Training** (`continuous_train.py`): `SEARCH_DEPTH = 2` — kept lower for training speed
 - **UCI engine** (`run_engine.py`): `search_depth = 5`
 - **GUI** (`pygame_bot_human.py`): `search_depth = 5`
 
@@ -196,8 +207,8 @@ to `vs_stockfish.pgn`.
 In `bot/chess_bot.py` constructor defaults:
 
 ```python
-material_weight  = 0.15   # pawn units per unit of material imbalance
-positional_weight = 0.05  # pawn units per PST centipawn score
+material_weight  = 0.15   # weight on material balance (pawn units)
+positional_weight = 0.05  # weight on piece-square-table score (pawn units)
 ```
 
 ### Opening book
@@ -270,7 +281,7 @@ search correctness. The training loop and eval function are validated manually v
 ## Tech Stack
 
 **Language:** Python
-**ML/RL:** TD(0) temporal-difference learning, self-play, ε-greedy exploration
+**ML/RL:** TD(λ) temporal-difference learning (Monte-Carlo, λ=1.0), self-play, ε-greedy exploration
 **Search:** alpha-beta, quiescence, transposition tables, Zobrist hashing, iterative deepening
 **Deployment:** AWS (EC2, S3, IAM, CloudWatch) · Docker · Docker Compose · Linux
 **Libraries:** python-chess, pygame, lichess-bot

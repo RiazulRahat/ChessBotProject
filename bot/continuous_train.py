@@ -14,19 +14,22 @@ from bot.chess_bot import ChessBotAgent
 
 # ─── hyper‑parameters you may tweak ─────────────────────────────────────
 DEFAULT_GAMES     = 1_000_000
-INITIAL_EPS       = 0.20   # higher start → more diverse positions early on
+INITIAL_EPS       = 0.20   # more diverse positions early on
 DECAY_EVERY       = 200    # decay more frequently
 DECAY_FACTOR      = 0.88   # steeper per-cycle decay
+EPS_FLOOR         = 0.03   # never stop exploring entirely
 LEARNING_RATE     = 0.15
 GAMMA             = 0.99   # TD discount: earlier positions weighted less
 SEARCH_DEPTH      = 2   # UCI engine plays at depth 5; kept lower here for training speed
-USE_QUIESCENCE    = False
-QUIESCENCE_DEPTH  = 5
+USE_QUIESCENCE    = True   
+QUIESCENCE_DEPTH  = 3     
 SAVE_INTERVAL     = 50
 PRINT_EVERY       = 100
 PRUNE_EVERY       = 2_000  # games between auto-prunes (0 = never)
 MIN_VISITS        = 2      # keep entries seen >= this many times
 MAX_ENTRIES       = 180_000  # hard ceiling
+ENDGAME_PIECES    = 7        # entries with <= this many pieces arent pruned
+VALUE_KEEP        = 0.5    # protect entries with |value| over this
 TABLE_PATH        = "bot/evaluation_table_current/eval_table_zobrist_pruned.pkl"
 BOOK_PATH         = "book_library/Perfect2023.bin"
 # ────────────────────────────────────────────────────────────────────────
@@ -41,38 +44,61 @@ def play_one(wbot: ChessBotAgent, bbot: ChessBotAgent):
 
     board, hist = chess.Board(), []
     while not board.is_game_over():
-        hist.append((zobrist.hash(board), board.turn == chess.WHITE, board.fen()))
+        fen = board.fen() if (wbot.track_fens or bbot.track_fens) else None
+        hist.append((zobrist.hash(board), board.turn == chess.WHITE, fen,
+                     chess.popcount(board.occupied)))
         mv = wbot.choose_move(board) if board.turn == chess.WHITE else bbot.choose_move(board)
         board.push(mv)
     return board.result(), hist
 
-def prune_table(agent, min_visits=MIN_VISITS, max_entries=MAX_ENTRIES):
-    """Drop low-signal entries: rarely-visited AND near-zero value.
-    Shrinks the in-memory table so both trainer and engine fit in RAM."""
-
+def prune_table(agent, max_entries=MAX_ENTRIES, min_visits=MIN_VISITS,
+                endgame_pieces=ENDGAME_PIECES):
+    
     table, stats = agent.evaluation_table, agent.zkey_stats
     before = len(table)
     if before == 0:
         return
+    # no stats → don't wipe the table
+    if not stats:
+        print(f"[prune] skipped: {before:,} entries but zkey_stats is empty "
+              f"(stats file missing or desynced)")
+        return
 
-    # keep: visited enough, OR holding a non-zero value
-    keep = {k for k, s in stats.items() if s.get("visits", 0) >= min_visits}
-    keep |= {k for k, v in table.items() if abs(v) > 0.05}
+    # protect endgames
+    endgames = {k for k in table
+                if stats.get(k, {}).get("pieces", 99) <= endgame_pieces}
 
-    # if still over the ceiling, raise the visit bar until we fit
-    bar = min_visits
-    while len(keep) > max_entries and bar < 50:
-        bar += 1
-        keep = {k for k, s in stats.items() if s.get("visits", 0) >= bar}
-        keep |= {k for k, v in table.items() if abs(v) > 0.05}
+    # keep decisive values, trim lowest |v| if over cap
+    valued = [k for k in table
+              if k not in endgames and abs(table[k]) > VALUE_KEEP]
+    room = max_entries - len(endgames)
+    if len(valued) > room:
+        valued.sort(key=lambda k: abs(table[k]), reverse=True)
+        valued = valued[:max(0, room)]
+    valued = set(valued)
 
-    # rebuild all three structures in place (shared dicts, so bot_b sees it too)
-    agent.evaluation_table = {k: table[k] for k in keep if k in table}
+    protected = endgames | valued
+
+    # fill rest by visits, then |v|
+    candidates = [k for k in table
+                  if k not in protected
+                  and stats.get(k, {}).get("visits", 0) >= min_visits]
+    room = max_entries - len(protected)
+    if room < len(candidates):
+        candidates.sort(key=lambda k: (stats.get(k, {}).get("visits", 0),
+                                       abs(table[k])), reverse=True)
+        candidates = candidates[:max(0, room)]
+
+    keep = protected | set(candidates)
+
+    agent.evaluation_table = {k: table[k] for k in keep}
     agent.zkey_to_fen = {k: agent.zkey_to_fen[k]
                          for k in keep if k in agent.zkey_to_fen}
     agent.zkey_stats = {k: stats[k] for k in keep if k in stats}
-    print(f"[prune] {before:,} → {len(agent.evaluation_table):,} "
-          f"entries (visit bar {bar})")
+    kept = len(agent.evaluation_table)
+    over = "  [over cap: endgame floor]" if kept > max_entries else ""
+    print(f"[prune] {before:,} → {kept:,} entries "
+          f"(cap {max_entries:,}; {len(endgames):,} endgame, {len(valued):,} valued){over}")
 
 
 def main(total_games: int = DEFAULT_GAMES):
@@ -119,9 +145,7 @@ def main(total_games: int = DEFAULT_GAMES):
             else:
                 draws += 1
 
-            # learning
             bot_w.update_evaluation(hist, result)
-            bot_b.update_evaluation(hist, result)
 
             # periodic logging
             if g % PRINT_EVERY == 0:
@@ -136,9 +160,8 @@ def main(total_games: int = DEFAULT_GAMES):
                 bot_w.quiesce_calls = bot_b.quiesce_calls = 0
                 dprint("ε now %.4f  table=%d", eps, size)
 
-            # ε decay
-            if g % DECAY_EVERY == 0:
-                eps *= DECAY_FACTOR
+            if g % DECAY_EVERY == 0 and eps > EPS_FLOOR:
+                eps = max(EPS_FLOOR, eps * DECAY_FACTOR)
                 bot_w.exploration_rate = bot_b.exploration_rate = eps
                 print(f"--- decayed ε → {eps:.3f} at game {g:,} ---")
 

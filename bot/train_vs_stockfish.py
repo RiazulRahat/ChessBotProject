@@ -194,7 +194,7 @@ def main(
             dprint("game %d  result=%s  plies=%d  sf-depth=%d",
                    g, result, len(hist), sf_depth)
 
-            # TD(0) update from game outcome
+            # TD(λ) update from game outcome
             bot.update_evaluation(hist, result)
 
             # Blend SF's positional evaluation into the table for every position

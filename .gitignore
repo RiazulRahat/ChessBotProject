@@ -173,35 +173,29 @@ cython_debug/
 # PyPI configuration file
 .pypirc
 
-# — Python —
-*.pyc
-__pycache__/
+# ─── Project-specific ───────────────────────────────────────────────
 
-# — virtual-envs —
-.venv/
-env/
-
-# — large data —
-bot/eval_table.pkl
-bot/eval_table*.pkl
-*.pgn
-*.log
-
-# — Ignore all Python pickle files —
+# Learned state — pickles are the source of truth, never committed
 *.pkl
 
-# — macOS metadata —
-.DS_Store
-**/.DS_Store
+# Training artifacts
+*.pgn
+training_log.txt
 
-# — Book library extras —
+# Book library extras
 book_library/Settings/
 
-# — Claude Code —
-CLAUDE.md
-.claude/settings.json
-.claude/settings.local.json
+# Graphify output & local tooling
+graphify-out
+tools
 
-# secrets / runtime
+# Claude Code
+CLAUDE.md
+.claude
+
+# Secrets / runtime
 training_model/config.yml
-training_log.txt
+
+# macOS metadata
+.DS_Store
+**/.DS_Store

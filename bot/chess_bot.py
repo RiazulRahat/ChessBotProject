@@ -1,18 +1,18 @@
 # bot/chess_bot.py
 from bot.utils.debug import dprint
-import os, time, datetime, random, pickle
+import os, sys, time, datetime, random, pickle
 import chess
 
 from bot.utils.zobrist import zobrist
 from bot.utils.opening_book import load_opening_book
 from bot.evaluation.positional_heuristics import positional_score
 import chess.polyglot
-# ────────────────────────────────────────────────────────────────────────
+# ---------------------------------------------------------------------------
 TABLE_FILE = "bot/evaluation_table_current/eval_table_phaseA.pkl"
 DRAW_BIAS  = 0.0
 INF        = float("inf")
 
-# unified piece values (centipawns)
+# piece values (centipawns)
 _PV = {chess.PAWN: 100, chess.KNIGHT: 320, chess.BISHOP: 330,
        chess.ROOK: 500, chess.QUEEN: 900, chess.KING: 20_000}
 
@@ -25,12 +25,13 @@ def victim_value(board: chess.Board, sq) -> int:
 def attacker_value(board: chess.Board, sq) -> int:
     atk = [board.piece_at(s).piece_type for s in board.attackers(board.turn, sq)]
     return min(_PV[t] for t in atk) if atk else 0
-# ------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
 
 
 class ChessBotAgent:
     """
-    TD(0) learner with ε‑greedy Alpha‑Beta and capture‑only quiescence.
+    TD(lambda) learner (lambda=1.0 gives Monte-Carlo returns) with an
+    epsilon-greedy alpha-beta search and capture-only quiescence.
     """
 
     def __init__(self,
@@ -42,12 +43,13 @@ class ChessBotAgent:
                  material_weight=0.15,
                  positional_weight=0.05,
                  gamma=0.99,
+                 td_lambda=1.0,
                  use_quiescence=False,
                  quiescence_depth=5,
                  book_bin_path=None,
                 track_fens=True):
 
-        # ── knobs --
+        # config
         self.exploration_rate  = exploration_rate
         self.learning_rate     = learning_rate
         self.save_interval     = save_interval
@@ -55,16 +57,17 @@ class ChessBotAgent:
         self.material_weight   = material_weight
         self.positional_weight = positional_weight
         self.gamma             = gamma
+        self.td_lambda         = td_lambda
         self.use_quiescence    = use_quiescence
         self.quiescence_depth  = quiescence_depth
         self.track_fens        = track_fens
 
-        # ── persistent tables --
+        # persistent tables
         self._table_path      = table_path
         self.evaluation_table = self._load_table()
         self.zkey_to_fen      = {}
         self.zkey_stats       = {}
-        self.tt               = {}   # key → (depth, value, bestMove)
+        self.tt               = {}   # key -> (depth, value, best_move)
         self.history          = [[0]*64 for _ in range(64)]  # [from_sq][to_sq]
 
         if self.track_fens and os.path.exists(table_path.replace(".pkl", "_zkey2fen.pkl")):
@@ -74,17 +77,17 @@ class ChessBotAgent:
             with open(table_path.replace(".pkl", "_stats.pkl"), "rb") as f:
                 self.zkey_stats = pickle.load(f)
 
-        # opening book — polyglot .bin takes priority; FEN-dict pkl is the fallback
+        # opening book: polyglot .bin first, FEN-dict pkl fallback
         self._book_bin_path = book_bin_path if book_bin_path and os.path.exists(book_bin_path) else None
         book_path = os.path.join(os.path.dirname(__file__), "opening_book.pkl")
         self.opening_book = load_opening_book(book_path)
 
         self.games_since_save = 0
         self.quiesce_calls    = 0
-        dprint("Bot created  LR=%.3f  ε=%.3f  depth=%d",
+        dprint("Bot created  LR=%.3f  eps=%.3f  depth=%d",
                self.learning_rate, self.exploration_rate, self.search_depth)
 
-    # ───────── evaluation helper function──────────────────────────
+    # --- evaluation helpers ---
     @staticmethod
     def _material(board: chess.Board) -> float:
         vals = {chess.PAWN: 1, chess.KNIGHT: 3, chess.BISHOP: 3,
@@ -103,91 +106,73 @@ class ChessBotAgent:
         pos  = positional_score(board)
         return base + self.material_weight * mat + self.positional_weight * pos
 
-
-
-
-    def choose_move(self, board: chess.Board):
-        """
-        This Function takes in a Board state and returns the best move following a list of protocols
-
-        --- Accessibility: Public ---
-
-        Function: choose_move
-
-        Parameter: chess.Board class
-        Return: chess.Move class or None
-
-        """
-        self._deadline = None   # fixed-depth search: no time limit
-        
-        # save fen of parameter - board object
-        fen = board.fen()
-        # save zobrist hash of parameter - board object
-        zKey = zobrist.hash(board)
-
-        # 0) Opening Book Fall-Through ----------
-        # Try polyglot .bin book first (weighted random choice among book moves)
+    def _book_move(self, board):
+        """Book move for this position, or None. Polyglot .bin first, FEN-dict fallback."""
         if self._book_bin_path:
             try:
                 with chess.polyglot.open_reader(self._book_bin_path) as reader:
-                    entry = reader.weighted_choice(board)
-                    return entry.move
+                    return reader.weighted_choice(board).move
             except IndexError:
-                pass  # position not in polyglot book; fall through to FEN-dict
-
+                pass   # not in polyglot; try FEN-dict
+        fen = board.fen()
         if fen in self.opening_book:
-            move = chess.Move.from_uci(random.choice(self.opening_book[fen]))
-            return move
+            return chess.Move.from_uci(random.choice(self.opening_book[fen]))
+        return None
 
-        # Check if there is any legal moves OR if no legal moves(eg Game Over) return None
-        legal = list(board.legal_moves)
-        if not legal:
-            return None
+    def choose_move(self, board: chess.Board):
+        """Pick a move: opening book, then epsilon-greedy random, then alpha-beta search."""
+        self._deadline = None   # fixed-depth search: no time limit
 
-        # 2) ε-greedy Exploration Rate - avoids overfitting on known paths ------
-        if random.random() < self.exploration_rate:
-            # Choose random legal move
-            mv = random.choice(legal)
+        # opening book
+        mv = self._book_move(board)
+        if mv:
             return mv
 
-        # 3) Search ------------------------------
-        #    True if White's turn else False
+        legal = list(board.legal_moves)
+        if not legal:
+            return None            # no legal moves: game over
+
+        # epsilon-greedy: occasionally play a random move to keep exploring
+        if random.random() < self.exploration_rate:
+            return random.choice(legal)
+
+        # search; White maximizes, Black minimizes
         maximise_white = (board.turn == chess.WHITE)
-        #    val - best_value, mv - best_move -> from αβ search (move object)
         val, mv = self._alphabeta(board, self.search_depth,
                                 -INF, +INF, maximise_white)
 
-        #    random legal move Fall-Back for no moves returned by αβ
+        # fall back to a random move if search returned nothing
         return mv or random.choice(legal)
-    
-
-
-
 
     def choose_move_timed(self, board: chess.Board, time_per_move: float):
+        # opening book first
+        mv = self._book_move(board)
+        if mv:
+            return mv
         start = time.time()
         self._deadline = start + time_per_move   # hard stop the search
         maximise = board.turn == chess.WHITE
         best = random.choice(list(board.legal_moves))
-        DELTA = 0.20  # ~1 pawn in this engine's evaluation scale
+        DELTA = 0.20  # aspiration margin, about one pawn on this engine's scale
 
-        # Depth 1: full window to get an initial score
+        # depth 1 on a full window for an initial score
         val, mv = self._alphabeta(board, 1, -INF, INF, maximise)
         if mv:
             best = mv
 
+        # iterative deepening within the time budget
         for depth in range(2, self.search_depth + 1):
             if time.time() - start >= time_per_move * 0.35:
                 break
-            # To return best move so far
             try:
+                # narrow window around the last score
                 lo, hi = val - DELTA, val + DELTA
                 result_val, result_mv = self._alphabeta(board, depth, lo, hi, maximise)
 
-                # Fail-low: widen downward and re-search
+                # fail-low: widen downward and re-search
                 if result_val <= lo:
                     result_val, result_mv = self._alphabeta(board, depth, -INF, hi, maximise)
-                # Fail-high: widen upward and re-search
+                # fail-high: widen upward and re-search
                 elif result_val >= hi:
                     result_val, result_mv = self._alphabeta(board, depth, lo, INF, maximise)
 
@@ -199,172 +184,101 @@ class ChessBotAgent:
 
         return best
 
-
-
     def _alphabeta(self, board: chess.Board, depth: int, alpha: float, beta: float, maximise_white: bool):
         """
-        α‑β search with transposition‐table and optional quiescence
-    
-        Recursively explores moves to the given depth, applying:
-        1. State guard (checkmate/draw).
-        2. TT lookup if a prior result at ≥ this depth is cached.
-        3. At depth == 0: optional quiescence extension, else static evaluation.
-        4. Main recursion with move ordering, α/β updates, and cutoffs.
-        5. TT storage of (depth, best_value, best_move).
+        Alpha-beta search with a transposition table and optional quiescence.
 
-        --- Accessibility: Private ---
+        Args:
+            board           chess.Board, mutated in place via push/pop
+            depth           plies left to search before the leaf
+            alpha, beta     search-window bounds
+            maximise_white  True if this node maximizes (White), else minimizes
 
-        Function: _alphabeta
-
-        Parameters:
-        board           – a chess.Board object (mutated via push/pop)
-        depth           – remaining plies to search before quiescence(leaf)
-        alpha, beta     – current α (max lower bound) and β (min upper bound).
-        maximise_white  – True if this node maximizes(W), else minimizes(B)
-        Return: Tuple  -> (value, best_move)
-        – `value` is the minimax score from this board position  
-        – `best_move` is the chosen chess.Move (or None for terminal/leaf)
-
+        Returns (value, best_move); best_move is None at terminal/leaf nodes.
         """
-        
-        # save zobrist hash of parameter - board object
         zKey = zobrist.hash(board)
 
-        # 0) Time guard — abort deep searches that overrun the move budget
+        # time guard: stop if we have blown the move budget
         if getattr(self, "_deadline", None) and time.time() >= self._deadline:
             raise TimeoutError
-        
-        # 1) Terminal state ----------------------
+
+        # terminal position
         if board.is_game_over():
             if board.is_checkmate():
-                # board.turn is the side that is checkmated (can't move, in check)
                 return (-INF if board.turn == chess.WHITE else INF), None
             return DRAW_BIAS, None  # stalemate / repetition / 50-move / material
-        # ----------------------------------------
 
-        
-        # 2) Look-up Transposition-Table ------
-        
-        # if zKey exists AND stored_depth is >= current depth (deeper search done)
+        # transposition table: reuse a result searched at least this deep
         if zKey in self.tt and self.tt[zKey][0] >= depth:
-            # return stored_value[1] and stored_move[2]
             return self.tt[zKey][1], self.tt[zKey][2]
-        # -------------------------------------
 
-        
-        # 3) Base case, depth == 0, Leaf Positions 
-        # Reached max given search depth ------
+        # leaf: max depth reached
         if depth == 0:
-            # quiescence hit before - uses special flag -1 for depth
+            # cached quiescence result (depth flag -1)
             if zKey in self.tt and self.tt[zKey][0] == -1:
-                # return previous quiescence call
                 return self.tt[zKey][1], None
-            # if quiescence turned on AND game is not over (defensive call - repeated)
+            # extend on captures if quiescence is enabled
             if self.use_quiescence and not board.is_game_over():
-                # quiescence calls count (not really needed) - Uncomment for debugging
-                # self.quiesce_calls += 1
-
-                # extends search to include all captures/checks from this position
+                self.quiesce_calls += 1
                 val = self.quiesce(board, alpha, beta,
                                 board.turn == chess.WHITE, 0)
-                # returns a stable evaluation, than a raw evaluation score (slightly better)
                 return val, None
-            # if quiescence is disabled call static evaluation
+            # otherwise static evaluation
             return self._state_value(board, zKey), None
-        # ---------------------------------------
 
-        
-        # ^^ Move is not in TT and depth>0 and game is not over ^^
-        
-        
-        # 4) Main Recursion Loop -----------------
+        # search each move (captures, checks, then quiet)
         best_move = None
-        
-        # Loop through a sorted move list
-        # Sort: TT move -> Captures -> ...
         for mv in self._ordered_moves(board):
-            # apply move to board - for recursion only
             board.push(mv)
-            # short-circuit: if this move immediately creates a claimable draw, penalise it
-            # without recursing (prevents the bot from walking into repetition)
-            if board.can_claim_draw():
+
+            if board.halfmove_clock >= 8 and board.can_claim_draw():
                 val = DRAW_BIAS
             else:
-                # recursive call - (depth-1) - flip maximise_white because turn changes
+                # recurse one ply deeper; flip the side to move
                 val, _ = self._alphabeta(board, depth - 1,
                                     alpha, beta, not maximise_white)
-            # revert board
             board.pop()
 
-            # White's turn (Maximizer)
-            if maximise_white:
-                # if the pushed move is better than alpha
+            if maximise_white:              # maximizing (White)
                 if val > alpha:
-                    # update α and best_move (so far)
                     alpha, best_move = val, mv
-                # β‑cutoff: Black will avoid this position
-                if alpha >= beta:
+                if alpha >= beta:           # beta cutoff
                     if not board.is_capture(mv):
                         self.history[mv.from_square][mv.to_square] += depth * depth
                     break
-            # Black's turn (Minimizer)
-            else:
-                # pushed move is better than beta
+            else:                           # minimizing (Black)
                 if val < beta:
-                    # update β and best_move (so far)
                     beta, best_move = val, mv
-                # α-cutoff: White will avoid this position
-                if beta <= alpha:
+                if beta <= alpha:           # alpha cutoff
                     if not board.is_capture(mv):
                         self.history[mv.from_square][mv.to_square] += depth * depth
                     break
 
-        
-        # 5) If no move survived (legal moves might be empty in stalemate)
-        # fall back instead of crashing
+        # no move chosen (e.g. everything pruned); fall back safely
         if best_move is None:
-            # if there is legal moves (rare case)
             moves = list(board.legal_moves)
-            # if case - pick one at random
             if moves:
                 best_move = random.choice(moves)
-            # really no legal moves → treat as stalemate
-            else:     
-                # static value
+            else:
+                # no legal moves: treat as stalemate
                 best_val = self._state_value(board)
-                # add to TT
                 self.tt[zKey] = (depth, best_val, None)
                 return best_val, None
 
-        # after if block ^ initialize the value to α for white and β for black
+        # best value is the tightened bound
         best_val = alpha if maximise_white else beta
-        # add to TT
-        self.tt[zKey] = (depth, best_val, best_move)
-
+        self.tt[zKey] = (depth, best_val, best_move)   # cache result
         return best_val, best_move
 
-
-
-    # ───────── quiescence search ────────────────────────────────────────
+    # --- quiescence search ---
     def quiesce(self, board, alpha, beta, maximise_white, curr_depth):
         """
-        This function extends the main α-β search in curr_depth layers deeper, for only captures
+        Extend the search on captures only until the position is quiet.
 
-        Parameters:
-            - board (chess.Board)
-            - alpha (maximizer value)
-            - beta (minimizer value)
-            - maximise_white (True if white's turn, else False)
-            - curr_depth (depth of quience search)
-
-        Returns: val (float)
-
-        Notes:
-        * **Soundness:** Only 'legal' captures are explored and the algorithm maintains the α/β invariants
-        * **Speed:** MVV-LVA ordering plus only captures so checks way less nodes
-        * **Transposition Table:** entries are stored with '-1' depth so main search can distinguish between quiescence vs α/β
+        Keeps the caller's alpha-beta window and orders captures by MVV-LVA.
+        Results are cached in the TT with depth flag -1 so the main search
+        can tell them apart from full-depth entries.
         """
-        # Store the zobrist value of board object
         zKey = zobrist.hash(board)
 
         if board.is_game_over():
@@ -372,63 +286,51 @@ class ChessBotAgent:
                 return -INF if board.turn == chess.WHITE else INF
             return DRAW_BIAS
 
-        # If key is in transposition table and previous quiescence search was done [-1]
+        # cached quiescence result
         if zKey in self.tt and self.tt[zKey][0] == -1:
-            return self.tt[zKey][1]    # return val
+            return self.tt[zKey][1]
 
-        # 'static' board state value (val)
+        # stand-pat evaluation, returned if every capture is pruned
         static_val = self._state_value(board, zKey)
-        best = static_val  # stand-pat; returned when all captures are pruned
+        best = static_val
 
-        # Compare static value
-        # if white's turn
-        if maximise_white:
+        if maximise_white:                  # maximizing (White)
             if static_val >= beta:
                 return beta
             alpha = max(alpha, static_val)
-        # if black's turn
-        else:
+        else:                               # minimizing (Black)
             if static_val <= alpha:
                 return alpha
             beta = min(beta, static_val)
 
-        # limit search depth of quiescence
+        # depth limit reached
         if curr_depth >= self.quiescence_depth:
-            # insert into transposition table
             self.tt[zKey] = (-1, static_val, None)
             return static_val
 
-        # Filter: separate captures from all moves in a list
+        # captures only, in MVV-LVA order
         moves = [move for move in board.legal_moves if board.is_capture(move)]
-
-        # One-liner sort
         moves.sort(key=lambda m: (-victim_value(board, m.to_square),
                                 attacker_value(board, m.from_square)))
 
-        # iterate sorted move list
         for m in moves:
-            # check the piece values
             gain = piece_value(board.piece_at(m.to_square))
 
-            # If best capture does not improve val, continue
+            # delta pruning: skip captures that cannot reach the window
             if maximise_white and static_val + gain < alpha:
                 continue
             if not maximise_white and static_val - gain > beta:
                 continue
 
-            # Push the best move into the board
             board.push(m)
-
             if board.can_claim_draw():
                 score = DRAW_BIAS
             else:
-                # Recursion - same alpha beta bounds, flip turn, increase depth by 1
+                # recurse one capture deeper
                 score = self.quiesce(board, alpha, beta,
                                     not maximise_white, curr_depth + 1)
-            # Pop to restore position
             board.pop()
 
-            # returns for cutoffs
             if maximise_white:
                 if score > best:
                     best = score
@@ -444,22 +346,17 @@ class ChessBotAgent:
                     self.tt[zKey] = (-1, alpha, None)
                     return alpha
 
-        # Final Quiescence score — actual best found (fail-soft)
+        # fail-soft: return the best score found
         self.tt[zKey] = (-1, best, None)
         return best
 
-
-    # ───────── move ordering ────────────────────────────────────────────
+    # --- move ordering ---
     def _ordered_moves(self, board):
-        """
-        'Move Ordering' heuristic that makes α‑β search more efficient by trying the best moves first
-        """
-        # categorizing moves into lists
-        caps = []    # All captures
-        checks = []  # 
-        quiet = []   # Not captures/checks
+        """Order moves (captures, checks, then quiet) so alpha-beta prunes sooner."""
+        caps   = []   # captures
+        checks = []   # non-capturing checks
+        quiet  = []   # everything else
 
-        # Iterate through the legal moves and add to empty lists
         for move in board.legal_moves:
             if board.is_capture(move):
                 caps.append(move)
@@ -468,57 +365,65 @@ class ChessBotAgent:
             else:
                 quiet.append(move)
 
-        # Most-Valuable-Victim, Least_Valuable_Attacker Key
+        # MVV-LVA: most valuable victim, least valuable attacker
         def mvv_lva(move):
-            # Pawn for en_passant, else captured piece or 0
             victim = chess.PAWN if board.is_en_passant(move) else \
                     (board.piece_at(move.to_square).piece_type
                     if board.piece_at(move.to_square) else 0)
-            # Attacking Piece
             attacker = board.piece_at(move.from_square).piece_type
-            
             return (-victim, attacker)
 
-        # sort by the mvv_lva value - explored first
         caps.sort(key=mvv_lva)
-        # sort by history heuristic score (higher = tried more cutoffs)
+        # quiet moves by history heuristic (more cutoffs first)
         quiet.sort(key=lambda m: self.history[m.from_square][m.to_square], reverse=True)
-        # Concatenate in order
         return caps + checks + quiet
 
-
-    # TD(0) Learning Core
+    # --- TD learning ---
     def update_evaluation(self, history, result):
-        next_v = 1.0 if result == "1-0" else -1.0 if result == "0-1" else DRAW_BIAS
-        for zkey, white_move, fen in reversed(history):
-            target = next_v if white_move else -next_v
-            old = self.evaluation_table.get(zkey, 0.0)
-            new = old + self.learning_rate * (target - old)
-            self.evaluation_table[zkey] = new
+        lam = self.td_lambda
+        # game result from White's view: +1 win, -1 loss, 0 draw
+        final_reward = 1.0 if result == "1-0" else -1.0 if result == "0-1" else DRAW_BIAS
 
-            if self.track_fens:
+        # value estimate and return of the position one ply later
+        next_value = next_return = None
+        for i, entry in enumerate(reversed(history)):
+            zkey   = entry[0]
+            fen    = entry[2] if len(entry) > 2 else None
+            pieces = entry[3] if len(entry) > 3 else None
+            if i == 0:
+                target = final_reward         # terminal position: use the result directly
+            else:
+                # blend the successor's value (weight 1-lam) with its return (weight lam)
+                target = self.gamma * ((1.0 - lam) * next_value + lam * next_return)
+            old_value = self.evaluation_table.get(zkey, 0.0)
+            new_value = old_value + self.learning_rate * (target - old_value)
+            self.evaluation_table[zkey] = new_value
+
+            if self.track_fens and fen is not None:
                 self.zkey_to_fen.setdefault(zkey, fen)
             st = self.zkey_stats.get(zkey, {"visits": 0, "last_seen": None})
             st["visits"] += 1
             st["last_seen"] = datetime.datetime.utcnow().timestamp()
+            if pieces is not None:
+                st["pieces"] = pieces   # lets prune keep endgames
             self.zkey_stats[zkey] = st
 
-            # gamma discounts the value passed to earlier positions
-            next_v = (new if white_move else -new) * self.gamma
+            # this position is the successor for the next (earlier) ply
+            next_value, next_return = new_value, target
 
         self.games_since_save += 1
         if self.games_since_save >= self.save_interval:
             self._save_table()
             self.games_since_save = 0
 
-    # ───────── persistence helpers ──────────────────────────────────────
+    # --- persistence ---
     def _load_table(self):
         if os.path.exists(self._table_path):
             try:
                 with open(self._table_path, "rb") as f:
                     return pickle.load(f)
             except Exception as e:
-                print("⚠️  could not load eval table:", e)
+                print("could not load eval table:", e, file=sys.stderr)
         return {}
 
     def _atomic_dump(self, obj, path):
@@ -527,7 +432,7 @@ class ChessBotAgent:
             pickle.dump(obj, f)
             f.flush()
             os.fsync(f.fileno())
-        os.replace(tmp, path) 
+        os.replace(tmp, path)
 
     def _save_table(self):
         os.makedirs(os.path.dirname(self._table_path), exist_ok=True)
@@ -539,5 +444,3 @@ class ChessBotAgent:
 
     def board_to_zkey(self, board):      # external tool hook
         return zobrist.hash(board)
-
-
